@@ -1,0 +1,16 @@
+[package]
+name = "hello-ffi"
+version = "0.1.0"
+authors = ["Alekos Filini <alekos.filini@gmail.com>"]
+edition = "2018"
+
+[lib]
+crate-type = ["dylib"]
+
+[dependencies]
+hello = { path = "./hello" }
+derive = { path = "./derive", features = ["debug"] }
+libc = { version = "0.2" }
+
+[build-dependencies]
+cbindgen = { version = "0.17" }
