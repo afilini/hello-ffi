@@ -106,6 +106,10 @@ impl<'w, C: CoinSelectionAlgorithm> TxBuilder<'w, C> {
         self.cs.do_something(5)
     }
 
+    pub fn get_wallet_name(&self) -> String {
+        self.wallet.wallet_name.clone()
+    }
+
     #[doc(hidden)]
     pub fn convert_internal_cs<N: CoinSelectionAlgorithm, F: Fn(C) -> N>(self, f: F) -> TxBuilder<'w, N> {
         let cs = f(self.cs);

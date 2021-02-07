@@ -25,5 +25,11 @@ int main() {
     };
     coin_selection(tx_builder, custom_cs);
 
-    printf("The result is: %d", finish(tx_builder));
+    char *wallet_name = get_wallet_name(tx_builder);
+    printf("Wallet name is: '%s'\n", wallet_name);
+    free(wallet_name);
+
+    printf("The result is: %d\n", finish(tx_builder));
+
+    wallet_destroy(wallet);
 }
