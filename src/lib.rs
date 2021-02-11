@@ -1,54 +1,57 @@
-use std::ffi::{CStr, CString};
 use std::ops::Drop;
 
-use libc::{c_char, c_void};
+use derive::{expose_mod, expose_fn, expose_struct};
 
-use derive::{Expose, expose};
+#[cfg(feature = "python")]
+use pyo3::prelude::*;
 
-macro_rules! assert_ptr {
-    ($ptr:expr) => {
-        assert!(($ptr as usize) > 0);
-    };
+#[cfg(not(any(feature = "c", feature = "python")))]
+compile_error!("No language enabled");
+
+#[cfg(all(feature = "c", any(feature = "python")))]
+compile_error!("Enable at most one language");
+#[cfg(all(feature = "python", any(feature = "c")))]
+compile_error!("Enable at most one language");
+
+#[expose_mod]
+mod hello {
+    #[expose_fn]
+    fn hello_static(a: String) -> String {
+        hello::HelloStruct::hello_static(a.as_str()).to_string()
+    }
+
+    // #[derive::expose_struct]
+    // struct HelloStruct(hello::HelloStruct);
 }
 
-macro_rules! str_out {
-    ($s:expr) => {{
-        let cstring = CString::new($s).expect("Invalid outgoing string");
-        let ptr = cstring.as_ptr();
-        std::mem::forget(cstring);
+// #[expose_fn]
+// fn test_2() {
+// }
 
-        ptr as *mut c_char
-    }}
+
+/*
+#[pyclass]
+pub struct HelloStruct {
+    inner: hello::HelloStruct
 }
 
-macro_rules! str_in {
-    ($s:expr) => {
-        unsafe {
-            CStr::from_ptr($s).to_str().expect("Invalid incoming string")
-        }
+#[pymethods]
+impl HelloStruct {
+    #[staticmethod]
+    pub fn py_hello_static() -> String {
+        hello::HelloStruct::hello_static().to_string()
+    }
+
+    pub fn py_hello_method(&self, string: String) -> String {
+        self.inner.hello_method(string.as_str())
     }
 }
 
-macro_rules! set_ptr_out {
-    ($ptr_out:expr, $result:expr) => {
-        assert_ptr!($ptr_out);
-        unsafe {
-            *$ptr_out = Box::into_raw(Box::new($result));
-        }
-    };
+#[pymodule]
+fn hello(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_class::<HelloStruct>()?;
+    Ok(())
 }
-
-macro_rules! destroy_ptr {
-    ($ptr:expr) => {
-        // Do nothing, let `Box` free our memory when it's dropped
-        assert_ptr!($ptr);
-        unsafe {
-            let _ = Box::from_raw($ptr);
-        }
-    }
-}
-
-pub struct HelloStruct(hello::HelloStruct);
 
 impl HelloStruct {
     #[no_mangle]
@@ -58,7 +61,7 @@ impl HelloStruct {
 
     #[no_mangle]
     pub extern "C" fn hello_method(&self, string: *const c_char) -> *mut c_char {
-        str_out!(self.0.hello_method(str_in!(string)))
+        str_out!(self.inner.hello_method(str_in!(string)))
     }
 }
 
@@ -187,4 +190,4 @@ impl TxBuilder {
         let this: TxBuilder = *Box::from_raw(self);
         this.0.finish()
     }
-}
+} */

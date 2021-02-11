@@ -6,13 +6,13 @@ pub struct HelloStruct;
 
 impl HelloStruct {
     /// Static method docs
-    pub fn hello_static() -> &'static str {
-        "Hello Static"
+    pub fn hello_static(string: &str) -> String {
+        format!("Hello Static {}", string)
     }
 
     /// Method documentation
     pub fn hello_method(&self, string: &str) -> String {
-        format!("Hello {}", string)
+        format!("Hello Method {}", string)
     }
 }
 

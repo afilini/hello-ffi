@@ -10,7 +10,12 @@ crate-type = ["dylib"]
 [dependencies]
 hello = { path = "./hello" }
 derive = { path = "./derive", features = ["debug"] }
-libc = { version = "0.2" }
+libc = { version = "0.2", optional = true}
+pyo3 = { version = "0.13", features = ["extension-module"], optional = true }
 
 [build-dependencies]
-cbindgen = { version = "0.17" }
+cbindgen = { version = "0.17", optional = true }
+
+[features]
+c = ["libc", "cbindgen", "derive/c"]
+python = ["pyo3", "derive/python"]
