@@ -4,7 +4,7 @@ use std::convert::TryFrom;
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{TokenStreamExt, quote};
-use syn::{ItemFn, Ident, FnArg, parse_quote, Pat, PatType, PatIdent};
+use syn::{ItemFn, Ident, FnArg, parse_quote, Pat, PatType, PatIdent, ItemStruct};
 
 use super::*;
 
@@ -16,12 +16,11 @@ impl Lang for C {
 
     fn expose_fn(function: &mut ItemFn, mod_path: &Vec<Ident>) -> Result<(), Self::Error> {
         let ident = &function.sig.ident;
-        let (inputs_fn_arg, input_conversion) = Self::convert_fn_args(function.sig.inputs.clone())?;
-        let (output_type, output_conversion) = Self::convert_output(function.sig.output.clone())?;
+        let (mut inputs, input_conversion) = Self::convert_fn_args(function.sig.inputs.clone())?;
+        let (output_type, extra_args, output_conversion) = Self::convert_output(function.sig.output.clone())?;
         let block = &function.block;
 
-        let mut inputs = TokenStream2::default();
-        inputs.append_all(inputs_fn_arg);
+        inputs.extend(extra_args);
 
         let input_conversion = TokenStream2::from(input_conversion);
         let output_conversion = TokenStream2::from(output_conversion);
@@ -41,6 +40,15 @@ impl Lang for C {
     }
 
     fn expose_mod(module: &mut ItemMod, mod_path: &Vec<Ident>) -> Result<(), Self::Error> {
+        module.vis = parse_quote!(pub);
+
+        Ok(())
+    }
+
+    fn expose_struct(structure: &mut ItemStruct, mod_path: &Vec<Ident>) -> Result<(), Self::Error> {
+        dbg!(&structure);
+        structure.attrs.push(parse_quote!(#[repr(C)]));
+
         Ok(())
     }
 
@@ -48,6 +56,17 @@ impl Lang for C {
         match dt {
             DataTypeIn::SelfRef => Ok((vec![parse_quote!(&self)], TokenStream::default())),
             DataTypeIn::SelfMutRef => Ok((vec![parse_quote!(&mut self)], TokenStream::default())),
+            DataTypeIn::SelfValue => {
+                let arg_name = arg_name.expect("Missing `arg_name`");
+
+                let args = vec![parse_quote!(#arg_name: *mut Self)];
+                let convert = (quote!{
+                    let #arg_name = unsafe { Box::from_raw(#arg_name) };
+                }).into();
+
+                Ok((args, convert))
+
+            },
             DataTypeIn::String => {
                 let arg_name = arg_name.expect("Missing `arg_name`");
 
@@ -65,13 +84,13 @@ impl Lang for C {
         }
     }
 
-    fn convert_output(output: ReturnType) -> Result<(Type, TokenStream), Self::Error> {
+    fn convert_output(output: ReturnType) -> Result<(Type, Vec<FnArg>, TokenStream), Self::Error> {
         let output_type = match output {
             ReturnType::Default => {
                 let out = parse_quote!( () );
                 let conv = (quote!( () )).into();
 
-                return Ok((out, conv));
+                return Ok((out, vec![], conv));
             },
             ReturnType::Type(_, ty) => *ty,
         };
@@ -87,8 +106,22 @@ impl Lang for C {
                     ptr as *mut libc::c_char
                 }).into();
 
-                Ok((out, conv))
-            }
+                Ok((out, vec![], conv))
+            },
+            DataTypeOut::SelfValue => {
+                let out = parse_quote!( () );
+                let extra_args = vec![parse_quote!(__ptr_out: *mut *mut Self)];
+                let conv = (quote! {
+                    unsafe {
+                        *__ptr_out = Box::into_raw(Box::new(output));
+                    }
+
+                    ()
+                }).into();
+
+                Ok((out, extra_args, conv))
+
+            },
         }
     }
 }

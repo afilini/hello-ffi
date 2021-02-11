@@ -20,13 +20,31 @@ mod hello {
         hello::HelloStruct::hello_static(a.as_str()).to_string()
     }
 
-    // #[derive::expose_struct]
-    // struct HelloStruct(hello::HelloStruct);
+    pub struct HelloStruct {
+        inner: hello::HelloStruct
+    }
+
+    #[expose_impl]
+    impl HelloStruct {
+        fn hello_struct_new() -> Self {
+            HelloStruct {
+                inner: hello::HelloStruct
+            }
+        }
+
+        fn hello_struct_destroy(s: Self) {
+        }
+
+        fn hello_method(&self, a: String) -> String {
+            self.inner.hello_method(a.as_str())
+        }
+    }
 }
 
-// #[expose_fn]
-// fn test_2() {
-// }
+#[expose_fn]
+fn test_2(f: String) {
+    println!("Printing from Rust: {}", f);
+}
 
 
 /*

@@ -3,7 +3,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::env;
 
-use syn::{Ident, ItemStruct, ItemMod, ItemFn, Item, ImplItem, parse_macro_input, ItemImpl, Type, TypePath, ImplItemMethod};
+use syn::{Ident, ItemStruct, ItemMod, ItemFn, Item, ImplItem, parse_macro_input, ItemImpl, Type, TypePath, ImplItemMethod, Fields};
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
 
@@ -14,6 +14,12 @@ use langs::{Lang};
 type CurrentLang = langs::c::C;
 #[cfg(feature = "python")]
 type CurrentLang = langs::python::Python;
+
+fn check_struct(s: &ItemStruct) {
+    if !matches!(s.fields, Fields::Named(_)) {
+        panic!("Only named structs are supported");
+    }
+}
 
 fn analyze_module(module: &mut ItemMod, mut path: Vec<Ident>) {
     path.push(module.ident.clone());
@@ -35,7 +41,14 @@ fn analyze_module(module: &mut ItemMod, mut path: Vec<Ident>) {
             Item::Struct(structure) => {
                 if let Some(pos) = structure.attrs.iter().position(|a| a.path.is_ident("expose_struct")) {
                     structure.attrs.remove(pos);
-                    expand_expose_struct(structure, &path);
+                    check_struct(structure);
+                    CurrentLang::expose_struct(structure, &path).unwrap();
+                }
+            },
+            Item::Impl(implementation) => {
+                if let Some(pos) = implementation.attrs.iter().position(|a| a.path.is_ident("expose_impl")) {
+                    implementation.attrs.remove(pos);
+                    do_expose_impl(implementation, &path);
                 }
             },
             _ => {}
@@ -43,6 +56,25 @@ fn analyze_module(module: &mut ItemMod, mut path: Vec<Ident>) {
     }
 
     CurrentLang::expose_mod(module, &path).unwrap();
+}
+
+fn do_expose_impl(implementation: &mut ItemImpl, mod_path: &Vec<Ident>) {
+    for item in &mut implementation.items {
+        dbg!(&item);
+
+        match item {
+            ImplItem::Method(ImplItemMethod { sig, vis, attrs, block, .. }) => {
+                let mut as_fn = ItemFn{ sig: sig.clone(), vis: vis.clone(), attrs: attrs.clone(), block: Box::new(block.clone()) };
+                CurrentLang::expose_fn(&mut as_fn, mod_path).unwrap();
+
+                *sig = as_fn.sig;
+                *vis = as_fn.vis;
+                *attrs = as_fn.attrs;
+                *block = *as_fn.block;
+            },
+            _ => {}
+        }
+    }
 }
 
 #[proc_macro_attribute]
@@ -58,21 +90,28 @@ pub fn expose_mod(_attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn expose_fn(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut input = parse_macro_input!(item as ItemFn);
-    CurrentLang::expose_fn(&mut input, &vec![]);
+    CurrentLang::expose_fn(&mut input, &vec![]).unwrap();
 
     (quote! {
         #input
     }).into()
 }
 
-fn expand_expose_struct(strucutre: &mut ItemStruct, mod_path: &Vec<Ident>) {
-    dbg!("exposing struct", strucutre, mod_path);
-}
-
 #[proc_macro_attribute]
 pub fn expose_struct(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut input = parse_macro_input!(item as ItemStruct);
-    expand_expose_struct(&mut input, &vec![]);
+    check_struct(&input);
+    CurrentLang::expose_struct(&mut input, &vec![]).unwrap();
+
+    (quote! {
+        #input
+    }).into()
+}
+
+#[proc_macro_attribute]
+pub fn expose_impl(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let mut input = parse_macro_input!(item as ItemImpl);
+    do_expose_impl(&mut input, &vec![]);
 
     (quote! {
         #input

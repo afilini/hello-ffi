@@ -2,7 +2,9 @@ use std::convert::TryFrom;
 use std::fmt;
 
 use proc_macro::TokenStream;
-use syn::{ItemFn, Ident, Path, FnArg, parse_quote, Pat, PatType, PatIdent, Type, ReturnType, ItemMod};
+use syn::{ItemFn, Ident, Path, FnArg, parse_quote, Pat, PatType, PatIdent, Type, ReturnType, ItemMod, ItemStruct};
+use syn::token::Comma;
+use syn::punctuated::Punctuated;
 
 #[cfg(feature = "c")]
 pub mod c;
@@ -13,6 +15,7 @@ pub mod python;
 pub enum LangError {
     UnknownFnArg(Box<FnArg>),
     UnknownOutputType(Box<Type>),
+    ImplicitSelfValueNotSupported,
 }
 
 impl fmt::Display for LangError {
@@ -27,6 +30,7 @@ impl std::error::Error for LangError {}
 pub enum DataTypeIn {
     SelfRef,
     SelfMutRef,
+    SelfValue,
 
     String,
 }
@@ -36,9 +40,11 @@ impl TryFrom<&FnArg> for DataTypeIn {
 
     fn try_from(arg: &FnArg) -> Result<Self, Self::Error> {
         Ok(match arg {
+            FnArg::Receiver(receiver) if receiver.reference.is_none() => return Err(LangError::ImplicitSelfValueNotSupported),
             FnArg::Receiver(receiver) if receiver.mutability.is_none() => DataTypeIn::SelfRef,
             FnArg::Receiver(receiver) if receiver.mutability.is_some() => DataTypeIn::SelfMutRef,
             FnArg::Typed(typed) if typed.ty == parse_quote!(String) => DataTypeIn::String,
+            FnArg::Typed(typed) if typed.ty == parse_quote!(Self) => DataTypeIn::SelfValue,
             x => return Err(LangError::UnknownFnArg(Box::new(x.clone())))
         })
     }
@@ -46,6 +52,8 @@ impl TryFrom<&FnArg> for DataTypeIn {
 
 pub enum DataTypeOut {
     String,
+
+    SelfValue,
 }
 
 impl TryFrom<&Type> for DataTypeOut {
@@ -54,6 +62,8 @@ impl TryFrom<&Type> for DataTypeOut {
     fn try_from(output: &Type) -> Result<Self, Self::Error> {
         if output == &parse_quote!(String) {
             return Ok(DataTypeOut::String);
+        } else if output == &parse_quote!(Self) {
+            return Ok(DataTypeOut::SelfValue);
         }
 
         Err(LangError::UnknownOutputType(Box::new(output.clone())))
@@ -67,13 +77,15 @@ pub trait Lang {
 
     fn expose_mod(module: &mut ItemMod, mod_path: &Vec<Ident>) -> Result<(), Self::Error>;
 
+    fn expose_struct(structure: &mut ItemStruct, mod_path: &Vec<Ident>) -> Result<(), Self::Error>;
+
     fn convert_arg(arg: FnArg, dt: DataTypeIn, arg_name: Option<Ident>) -> Result<(Vec<FnArg>, TokenStream), Self::Error>;
 
-    fn convert_output(output: ReturnType) -> Result<(Type, TokenStream), Self::Error>;
+    fn convert_output(output: ReturnType) -> Result<(Type, Vec<FnArg>, TokenStream), Self::Error>;
 
     // provided methods
-    fn convert_fn_args<I: IntoIterator<Item = FnArg>>(args: I) -> Result<(Vec<FnArg>, TokenStream), Self::Error> {
-        Ok(args.into_iter()
+    fn convert_fn_args<I: IntoIterator<Item = FnArg>>(args: I) -> Result<(Punctuated<FnArg, Comma>, TokenStream), Self::Error> {
+        let (args, ts) = args.into_iter()
             .map(|arg| {
                 let dt = DataTypeIn::try_from(&arg)?;
 
@@ -97,6 +109,8 @@ pub trait Lang {
                 fold_ts.extend(ts);
 
                 (fold_args, fold_ts)
-            }))
+            });
+
+        Ok((args.into_iter().collect(), ts))
     }
 }

@@ -9,8 +9,17 @@
 int main() {
     char *res = hello_static("World!");
     printf("Result: '%s'\n", res);
-
     free(res);
+
+    struct HelloStruct *s;
+    hello_struct_new(&s);
+    res = hello_method((const struct HelloStruct*) &s, "StructWorld!");
+    printf("Result: '%s'\n", res);
+    free(res);
+    hello_struct_destroy(s);
+
+    test_2("AAAAAAAAAAAAAAHHHHHHHHHH");
+
     // struct Wallet *wallet;
     // wallet_new("Wallet Name", &wallet);
 
