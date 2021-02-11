@@ -2,7 +2,9 @@
 ///
 /// Multiple lines
 #[derive(Debug)]
-pub struct HelloStruct;
+pub struct HelloStruct {
+    pub init: String,
+}
 
 impl HelloStruct {
     /// Static method docs
@@ -12,7 +14,7 @@ impl HelloStruct {
 
     /// Method documentation
     pub fn hello_method(&self, string: &str) -> String {
-        format!("Hello Method {}", string)
+        format!("Hello Method. Init({}): {}", self.init, string)
     }
 }
 

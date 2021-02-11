@@ -2,7 +2,8 @@ use std::convert::TryFrom;
 use std::fmt;
 
 use proc_macro::TokenStream;
-use syn::{ItemFn, Ident, Path, FnArg, parse_quote, Pat, PatType, PatIdent, Type, ReturnType, ItemMod, ItemStruct};
+use syn::{ItemFn, Ident, Path, FnArg, parse_quote, Pat, PatType, PatIdent, Type, ReturnType, ItemMod, ItemStruct, ItemImpl, Token, Lit, LitStr};
+use syn::parse::{Parse, ParseStream};
 use syn::token::Comma;
 use syn::punctuated::Punctuated;
 
@@ -27,6 +28,7 @@ impl fmt::Display for LangError {
 impl std::error::Error for LangError {}
 
 // TODO add useful info inside, like the arg name
+#[derive(Debug)]
 pub enum DataTypeIn {
     SelfRef,
     SelfMutRef,
@@ -50,10 +52,18 @@ impl TryFrom<&FnArg> for DataTypeIn {
     }
 }
 
+#[derive(Debug)]
 pub enum DataTypeOut {
     String,
 
     SelfValue,
+}
+
+#[derive(Debug)]
+pub enum ModuleItem {
+    Function(Ident),
+    Structure(Ident),
+    Module(Ident),
 }
 
 impl TryFrom<&Type> for DataTypeOut {
@@ -70,14 +80,32 @@ impl TryFrom<&Type> for DataTypeOut {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExposeStructOpts {
+    Opaque,
+}
+
+impl Parse for ExposeStructOpts {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let lookahead = input.lookahead1();
+        if lookahead.peek(Lit) && input.peek(LitStr) && input.parse::<LitStr>().unwrap().value() == "opaque" {
+            Ok(ExposeStructOpts::Opaque)
+        } else {
+            Err(lookahead.error())
+        }
+    }
+}
+
 pub trait Lang {
     type Error: From<LangError> + std::error::Error;
 
-    fn expose_fn(function: &mut ItemFn, mod_path: &Vec<Ident>) -> Result<(), Self::Error>;
+    fn expose_fn(function: &mut ItemFn, mod_path: &Vec<Ident>) -> Result<Ident, Self::Error>;
 
-    fn expose_mod(module: &mut ItemMod, mod_path: &Vec<Ident>) -> Result<(), Self::Error>;
+    fn expose_mod(module: &mut ItemMod, mod_path: &Vec<Ident>, sub_items: Vec<ModuleItem>) -> Result<Ident, Self::Error>;
 
-    fn expose_struct(structure: &mut ItemStruct, mod_path: &Vec<Ident>) -> Result<(), Self::Error>;
+    fn expose_struct(structure: &mut ItemStruct, opts: Punctuated<ExposeStructOpts, Token![,]>, mod_path: &Vec<Ident>) -> Result<Ident, Self::Error>;
+
+    fn expose_impl(implementation: &mut ItemImpl, mod_path: &Vec<Ident>) -> Result<(), Self::Error>;
 
     fn convert_arg(arg: FnArg, dt: DataTypeIn, arg_name: Option<Ident>) -> Result<(Vec<FnArg>, TokenStream), Self::Error>;
 

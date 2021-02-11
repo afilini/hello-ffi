@@ -4,7 +4,8 @@ use std::convert::TryFrom;
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{TokenStreamExt, quote};
-use syn::{ItemFn, Ident, FnArg, parse_quote, Pat, PatType, PatIdent, ItemStruct};
+use syn::{ItemFn, Ident, FnArg, parse_quote, Pat, PatType, PatIdent, ItemStruct, ImplItem, ImplItemMethod, Token};
+use syn::punctuated::Punctuated;
 
 use super::*;
 
@@ -14,7 +15,7 @@ pub struct C;
 impl Lang for C {
     type Error = CError;
 
-    fn expose_fn(function: &mut ItemFn, mod_path: &Vec<Ident>) -> Result<(), Self::Error> {
+    fn expose_fn(function: &mut ItemFn, mod_path: &Vec<Ident>) -> Result<Ident, Self::Error> {
         let ident = &function.sig.ident;
         let (mut inputs, input_conversion) = Self::convert_fn_args(function.sig.inputs.clone())?;
         let (output_type, extra_args, output_conversion) = Self::convert_output(function.sig.output.clone())?;
@@ -36,18 +37,38 @@ impl Lang for C {
             }
         };
 
-        Ok(())
+        Ok(function.sig.ident.clone())
     }
 
-    fn expose_mod(module: &mut ItemMod, mod_path: &Vec<Ident>) -> Result<(), Self::Error> {
+    fn expose_mod(module: &mut ItemMod, mod_path: &Vec<Ident>, sub_items: Vec<ModuleItem>) -> Result<Ident, Self::Error> {
         module.vis = parse_quote!(pub);
 
-        Ok(())
+        Ok(module.ident.clone())
     }
 
-    fn expose_struct(structure: &mut ItemStruct, mod_path: &Vec<Ident>) -> Result<(), Self::Error> {
-        dbg!(&structure);
-        structure.attrs.push(parse_quote!(#[repr(C)]));
+    fn expose_struct(structure: &mut ItemStruct, opts: Punctuated<ExposeStructOpts, Token![,]>, mod_path: &Vec<Ident>) -> Result<Ident, Self::Error> {
+        if opts.iter().find(|o| **o == ExposeStructOpts::Opaque).is_none() {
+            structure.attrs.push(parse_quote!(#[repr(C)]));
+        }
+
+        Ok(structure.ident.clone())
+    }
+
+    fn expose_impl(implementation: &mut ItemImpl, mod_path: &Vec<Ident>) -> Result<(), Self::Error> {
+        for item in &mut implementation.items {
+            match item {
+                ImplItem::Method(ImplItemMethod { sig, vis, attrs, block, .. }) => {
+                    let mut as_fn = ItemFn{ sig: sig.clone(), vis: vis.clone(), attrs: attrs.clone(), block: Box::new(block.clone()) };
+                    Self::expose_fn(&mut as_fn, mod_path)?;
+
+                    *sig = as_fn.sig;
+                    *vis = as_fn.vis;
+                    *attrs = as_fn.attrs;
+                    *block = *as_fn.block;
+                },
+                _ => {}
+            }
+        }
 
         Ok(())
     }

@@ -1,9 +1,4 @@
-use std::ops::Drop;
-
 use derive::{expose_mod, expose_fn, expose_struct};
-
-#[cfg(feature = "python")]
-use pyo3::prelude::*;
 
 #[cfg(not(any(feature = "c", feature = "python")))]
 compile_error!("No language enabled");
@@ -15,35 +10,47 @@ compile_error!("Enable at most one language");
 
 #[expose_mod]
 mod hello {
-    #[expose_fn]
-    fn hello_static(a: String) -> String {
-        hello::HelloStruct::hello_static(a.as_str()).to_string()
+    #[expose_mod]
+    mod inner {
     }
 
+    #[expose_struct("opaque")]
     pub struct HelloStruct {
         inner: hello::HelloStruct
     }
 
     #[expose_impl]
     impl HelloStruct {
-        fn hello_struct_new() -> Self {
+        #[constructor]
+        fn hello_struct_new(init: String) -> Self {
             HelloStruct {
-                inner: hello::HelloStruct
+                inner: hello::HelloStruct {
+                    init
+                }
             }
         }
 
+        fn hello_static(a: String) -> String {
+            hello::HelloStruct::hello_static(a.as_str()).to_string()
+        }
+
+        #[destructor]
         fn hello_struct_destroy(s: Self) {
         }
 
         fn hello_method(&self, a: String) -> String {
             self.inner.hello_method(a.as_str())
         }
-    }
-}
 
-#[expose_fn]
-fn test_2(f: String) {
-    println!("Printing from Rust: {}", f);
+        fn get_init(&self) -> String {
+            self.inner.init.clone()
+        }
+    }
+
+    #[expose_fn]
+    fn test_pure_fn(f: String) {
+        println!("Printing from Rust: {}", f);
+    }
 }
 
 
