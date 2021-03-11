@@ -2,11 +2,14 @@ use std::ops::Deref;
 
 use proc_macro2::TokenStream as TokenStream2;
 
-use quote::{quote, ToTokens, format_ident};
+use quote::{format_ident, quote, ToTokens};
 
-use syn::{Type, FnArg, ReturnType, parse_quote, Ident, PatType, PatIdent, Pat, Path, TypePath, GenericArgument, PathSegment, PathArguments, BareFnArg};
 use syn::punctuated::Punctuated;
-use syn::token::{RArrow, Comma};
+use syn::token::{Comma, RArrow};
+use syn::{
+    parse_quote, BareFnArg, FnArg, GenericArgument, Ident, Pat, PatIdent, PatType, Path,
+    PathArguments, PathSegment, ReturnType, Type, TypePath,
+};
 
 use crate::langs::LangError;
 
@@ -25,9 +28,9 @@ impl<T: IntoIterator<Item = Type>> AsTuple for T {
         let punctuated = self.into_iter().collect::<Punctuated<_, Comma>>();
 
         match punctuated.len() {
-            0 => parse_quote!{ () },
-            1 => parse_quote!{ #punctuated },
-            _ => parse_quote!{ ( #punctuated ) },
+            0 => parse_quote! { () },
+            1 => parse_quote! { #punctuated },
+            _ => parse_quote! { ( #punctuated ) },
         }
     }
 }
@@ -42,33 +45,38 @@ pub fn match_fixed_type(ty: &Type, type_path: Path) -> bool {
 pub fn match_generic_type(ty: &Type, type_path: Path) -> Option<Type> {
     if let Type::Path(TypePath { path, .. }) = ty {
         let mut path = path.clone();
-        path.segments.iter_mut().last()
+        path.segments
+            .iter_mut()
+            .last()
             // Remove the generic from the last path segment and return it
-            .and_then(|PathSegment { ref mut arguments, .. }| {
-                let original_arguments = arguments.clone();
-                *arguments = PathArguments::None;
+            .and_then(
+                |PathSegment {
+                     ref mut arguments, ..
+                 }| {
+                    let original_arguments = arguments.clone();
+                    *arguments = PathArguments::None;
 
-                Some(original_arguments)
-            })
-
+                    Some(original_arguments)
+                },
+            )
             // Compare the path without generic to the required one
             .filter(|_| path == type_path)
-            
             // Return the content of the angle brackets, if present
             .and_then(|arguments| match arguments {
                 PathArguments::AngleBracketed(inner) => Some(inner.args),
                 _ => None,
             })
-            
             // Map the content to a list of types, only if all the items are types
             .and_then(|content| {
-                content.into_iter().try_fold(Punctuated::<Type, Comma>::default(), |mut acc, f| match f {
-                    GenericArgument::Type(ty) => {
-                        acc.push(ty);
-                        Some(acc)
-                    },
-                    _ => None,
-                })
+                content
+                    .into_iter()
+                    .try_fold(Punctuated::<Type, Comma>::default(), |mut acc, f| match f {
+                        GenericArgument::Type(ty) => {
+                            acc.push(ty);
+                            Some(acc)
+                        }
+                        _ => None,
+                    })
             })
             .map(AsTuple::as_tuple)
     } else {
@@ -84,7 +92,7 @@ pub trait ReturnTypeTyped {
 impl ReturnTypeTyped for ReturnType {
     fn as_type(&self) -> Type {
         match self {
-            ReturnType::Default => parse_quote!{ () },
+            ReturnType::Default => parse_quote! { () },
             ReturnType::Type(_, ty) => (**ty).clone(),
         }
     }
@@ -105,7 +113,7 @@ pub enum Input {
         sources: Vec<Box<Type>>,
 
         expand: Box<dyn Fn(&Type, &Ident) -> ExpandedInputConversion>,
-    }
+    },
 }
 
 #[derive(Debug)]
@@ -145,7 +153,11 @@ impl Input {
         }
     }
 
-    pub fn new_custom<F: 'static + Fn(&Type, &Ident) -> ExpandedInputConversion>(target: Type, sources: Vec<Type>, expand: F) -> Self {
+    pub fn new_custom<F: 'static + Fn(&Type, &Ident) -> ExpandedInputConversion>(
+        target: Type,
+        sources: Vec<Type>,
+        expand: F,
+    ) -> Self {
         Input::Custom {
             target: Box::new(target),
             sources: sources.into_iter().map(Box::new).collect(),
@@ -156,30 +168,30 @@ impl Input {
     pub fn get_sources(&self) -> Vec<&Box<Type>> {
         match self {
             Input::Unchanged(ty) => vec![ty],
-            Input::MapFrom { sources, .. } | Input::Custom { sources, .. } => sources.iter().collect(),
+            Input::MapFrom { sources, .. } | Input::Custom { sources, .. } => {
+                sources.iter().collect()
+            }
         }
     }
 
     pub fn expand(self, ident: &Ident) -> ExpandedInput {
         match self {
-            Input::Unchanged(ty) => {
-                ExpandedInput {
-                    conv: ExpandedInputConversion::pass_through(ident),
-                    types: vec![ty],
-                }
+            Input::Unchanged(ty) => ExpandedInput {
+                conv: ExpandedInputConversion::pass_through(ident),
+                types: vec![ty],
             },
-            Input::MapFrom{target, sources} => {
-                ExpandedInput {
-                    conv: ExpandedInputConversion::map_from(&target, ident),
-                    types: sources,
-                }
+            Input::MapFrom { target, sources } => ExpandedInput {
+                conv: ExpandedInputConversion::map_from(&target, ident),
+                types: sources,
             },
-            Input::Custom{ target, sources, expand } => {
-                ExpandedInput {
-                    conv: expand(&target, ident),
-                    types: sources,
-                }
-            }
+            Input::Custom {
+                target,
+                sources,
+                expand,
+            } => ExpandedInput {
+                conv: expand(&target, ident),
+                types: sources,
+            },
         }
     }
 }
@@ -214,27 +226,35 @@ impl Argument {
                     args: vec![r].into_iter().collect(),
                     conv: ExpandedArgumentConversion::empty(),
                 });
-            },
-            FnArg::Typed(PatType { pat, ty, .. }) => {
-                match *pat {
-                    Pat::Ident(PatIdent { ident, .. }) => (ident, ty),
-                    _ => return Err(LangError::ComplexPatternFnArg.into()),
-                }
             }
+            FnArg::Typed(PatType { pat, ty, .. }) => match *pat {
+                Pat::Ident(PatIdent { ident, .. }) => (ident, ty),
+                _ => return Err(LangError::ComplexPatternFnArg.into()),
+            },
         };
 
         let temp_ident = format_ident!("_temp_{}", ident);
         let expanded = convert_input(*ty)?.expand(&temp_ident);
         let input_conv = &expanded.conv;
 
-        let idents = expanded.types.iter().enumerate().map(|(i, _)| Ident::new(&format!("__{}_{}", ident, i), ident.span())).collect::<Punctuated<_, Comma>>();
+        let idents = expanded
+            .types
+            .iter()
+            .enumerate()
+            .map(|(i, _)| Ident::new(&format!("__{}_{}", ident, i), ident.span()))
+            .collect::<Punctuated<_, Comma>>();
 
         let conv = quote! {
             let #temp_ident = (#idents);
             let #ident = #input_conv;
         };
 
-        let args = expanded.types.into_iter().zip(idents.into_iter()).map::<FnArg, _>(|(ty, ident)| parse_quote!(#ident: #ty)).collect();
+        let args = expanded
+            .types
+            .into_iter()
+            .zip(idents.into_iter())
+            .map::<FnArg, _>(|(ty, ident)| parse_quote!(#ident: #ty))
+            .collect();
 
         Ok(ExpandedArgument {
             args,
@@ -308,13 +328,19 @@ impl Output {
     }
 
     pub fn new_map_to(original: Type, targets: Vec<Type>) -> Self {
-        Self::new_map_to_suffix(original, targets.into_iter().enumerate().map(|(i, t)| (t, i.to_string())).collect())
+        Self::new_map_to_suffix(
+            original,
+            targets
+                .into_iter()
+                .enumerate()
+                .map(|(i, t)| (t, i.to_string()))
+                .collect(),
+        )
     }
 
     pub fn new_map_to_single(original: Type, target: Type) -> Self {
         Self::new_map_to_suffix(original, vec![(target, String::new())])
     }
-
 
     pub fn get_targets(&self) -> Vec<Box<Type>> {
         match self {
@@ -325,12 +351,10 @@ impl Output {
 
     pub fn expand(&self, ident: &Ident) -> ExpandedOutput {
         match self {
-            Output::Unchanged(ty) => {
-                ExpandedOutput {
-                    ty: vec![ty.clone()],
-                    suffix: vec![String::new()],
-                    conv: ExpandedOutputConversion::pass_through(ident),
-                }
+            Output::Unchanged(ty) => ExpandedOutput {
+                ty: vec![ty.clone()],
+                suffix: vec![String::new()],
+                conv: ExpandedOutputConversion::pass_through(ident),
             },
             Output::MapTo { original, targets } => {
                 let (targets, suffix) = targets.iter().cloned().unzip();
@@ -340,13 +364,11 @@ impl Output {
                     suffix,
                     conv: ExpandedOutputConversion::map_to(ident, &original),
                 }
-            },
-            Output::ByReference(ty) => {
-                ExpandedOutput {
-                    ty: vec![parse_quote!{ *mut #ty }],
-                    suffix: vec![String::new()],
-                    conv: ExpandedOutputConversion::by_reference(ident),
-                }
+            }
+            Output::ByReference(ty) => ExpandedOutput {
+                ty: vec![parse_quote! { *mut #ty }],
+                suffix: vec![String::new()],
+                conv: ExpandedOutputConversion::by_reference(ident),
             },
         }
     }
@@ -366,7 +388,12 @@ pub struct ExpandedReturn {
 }
 
 impl Return {
-    pub fn expand<F, E>(self, ident: &Ident, arg_name: &Ident, convert_output: F) -> Result<ExpandedReturn, E>
+    pub fn expand<F, E>(
+        self,
+        ident: &Ident,
+        arg_name: &Ident,
+        convert_output: F,
+    ) -> Result<ExpandedReturn, E>
     where
         E: From<LangError>,
         F: Fn(Type) -> Result<Output, E>,
@@ -385,17 +412,15 @@ impl Return {
                     ret: ReturnType::Default,
                     extra_args: vec![extra_arg],
                     conv: ExpandedReturnConversion::from(quote! {
-                        *#arg_name = #ident; 
+                        *#arg_name = #ident;
                     }),
                 })
-            },
-            _ => {
-                Ok(ExpandedReturn {
-                    ret: ReturnType::Type(Default::default(), Box::new(ty)),
-                    extra_args: vec![],
-                    conv: ExpandedReturnConversion::from(conv.into_inner()),
-                })
-            },
+            }
+            _ => Ok(ExpandedReturn {
+                ret: ReturnType::Type(Default::default(), Box::new(ty)),
+                extra_args: vec![],
+                conv: ExpandedReturnConversion::from(conv.into_inner()),
+            }),
         }
     }
 }
@@ -407,7 +432,11 @@ pub struct CallbackArgument(pub BareFnArg);
 pub struct ExpandedCallbackArgumentConversion(TokenStream2);
 
 impl ExpandedCallbackArgumentConversion {
-    fn group_sub_args(ident: &Ident, arg_names: Vec<Ident>, original: ExpandedOutputConversion) -> Self {
+    fn group_sub_args(
+        ident: &Ident,
+        arg_names: Vec<Ident>,
+        original: ExpandedOutputConversion,
+    ) -> Self {
         let grouped = arg_names.into_iter().collect::<Punctuated<_, Comma>>();
         let original = original.into_inner();
 
@@ -426,7 +455,11 @@ pub struct ExpandedCallbackArgument {
 }
 
 impl CallbackArgument {
-    pub fn expand<F, E>(self, ident: &Ident, convert_output: F) -> Result<ExpandedCallbackArgument, E>
+    pub fn expand<F, E>(
+        self,
+        ident: &Ident,
+        convert_output: F,
+    ) -> Result<ExpandedCallbackArgument, E>
     where
         E: From<LangError>,
         F: Fn(Type) -> Result<Output, E>,
@@ -434,14 +467,18 @@ impl CallbackArgument {
         let converted = convert_output(self.0.ty)?;
 
         let ExpandedOutput { ty, suffix, conv } = converted.expand(&ident);
-        let (args, arg_names): (Vec<_>, Vec<_>) = ty.into_iter().zip(suffix.into_iter()).map(|(t, s)| {
-            let arg_name = match s.is_empty() {
-                true => ident.clone(),
-                false => format_ident!("{}_{}", ident, s)
-            };
+        let (args, arg_names): (Vec<_>, Vec<_>) = ty
+            .into_iter()
+            .zip(suffix.into_iter())
+            .map(|(t, s)| {
+                let arg_name = match s.is_empty() {
+                    true => ident.clone(),
+                    false => format_ident!("{}_{}", ident, s),
+                };
 
-            (parse_quote!(#arg_name: #t), arg_name)
-        }).unzip();
+                (parse_quote!(#arg_name: #t), arg_name)
+            })
+            .unzip();
 
         Ok(ExpandedCallbackArgument {
             args,
@@ -472,7 +509,10 @@ impl CallbackReturn {
 
         let ret = match expanded.types.is_empty() {
             true => ReturnType::Default,
-            false => ReturnType::Type(Default::default(), Box::new(expanded.types.into_iter().map(|t| *t).as_tuple()))
+            false => ReturnType::Type(
+                Default::default(),
+                Box::new(expanded.types.into_iter().map(|t| *t).as_tuple()),
+            ),
         };
 
         Ok(ExpandedCallbackReturn {
@@ -486,7 +526,7 @@ macro_rules! impl_common_traits {
     ($ty:ident) => {
         impl From<TokenStream2> for $ty {
             fn from(ts: TokenStream2) -> Self {
-                $ty(ts) 
+                $ty(ts)
             }
         }
 

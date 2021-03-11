@@ -19,3 +19,6 @@ cbindgen = { version = "0.17", optional = true }
 [features]
 c = ["libc", "cbindgen", "derive/c"]
 python = ["pyo3", "derive/python"]
+
+[workspace]
+members = ["derive", "hello"]

@@ -25,7 +25,9 @@ pub struct Wallet {
 
 impl Wallet {
     pub fn new(wallet_name: &str) -> Self {
-        Wallet { wallet_name: wallet_name.to_string() }
+        Wallet {
+            wallet_name: wallet_name.to_string(),
+        }
     }
 
     pub fn create_tx(&self) -> TxBuilder<'_, DoubleCS> {
@@ -113,7 +115,10 @@ impl<'w, C: CoinSelectionAlgorithm> TxBuilder<'w, C> {
     }
 
     #[doc(hidden)]
-    pub fn convert_internal_cs<N: CoinSelectionAlgorithm, F: Fn(C) -> N>(self, f: F) -> TxBuilder<'w, N> {
+    pub fn convert_internal_cs<N: CoinSelectionAlgorithm, F: Fn(C) -> N>(
+        self,
+        f: F,
+    ) -> TxBuilder<'w, N> {
         let cs = f(self.cs);
 
         TxBuilder {

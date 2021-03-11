@@ -1,5 +1,5 @@
+use syn::parse::{Parse, ParseStream};
 use syn::{Lit, LitStr};
-use syn::parse::{ParseStream, Parse};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExposeStructOpts {
@@ -9,12 +9,13 @@ pub enum ExposeStructOpts {
 impl Parse for ExposeStructOpts {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let lookahead = input.lookahead1();
-        if lookahead.peek(Lit) && input.peek(LitStr) && input.parse::<LitStr>().unwrap().value() == "opaque" {
+        if lookahead.peek(Lit)
+            && input.peek(LitStr)
+            && input.parse::<LitStr>().unwrap().value() == "opaque"
+        {
             Ok(ExposeStructOpts::Opaque)
         } else {
             Err(lookahead.error())
         }
     }
 }
-
-

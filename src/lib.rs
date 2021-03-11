@@ -1,4 +1,4 @@
-use derive::{expose_mod, expose_fn, expose_struct};
+use derive::{expose_fn, expose_mod, expose_struct};
 
 #[cfg(not(any(feature = "c", feature = "python")))]
 compile_error!("No language enabled");
@@ -15,7 +15,10 @@ pub trait MapFrom<Source> {
 impl MapFrom<*const libc::c_char> for String {
     fn map_from(s: *const libc::c_char) -> Self {
         unsafe {
-            std::ffi::CStr::from_ptr(s).to_str().expect("Invalid incoming string").to_string()
+            std::ffi::CStr::from_ptr(s)
+                .to_str()
+                .expect("Invalid incoming string")
+                .to_string()
         }
     }
 }
@@ -29,9 +32,7 @@ impl<T> MapFrom<T> for T {
 
 impl<F: Clone, T: MapFrom<F>> MapFrom<(*const F, usize)> for Vec<T> {
     fn map_from((ptr, len): (*const F, usize)) -> Self {
-        let slice = unsafe {
-            std::slice::from_raw_parts(ptr, len)
-        };
+        let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
         slice.to_vec().into_iter().map(T::map_from).collect()
     }
 }
@@ -109,8 +110,12 @@ mod hello {
     // }
 
     #[expose_fn]
-    fn test_callback(f: fn(s: String, v: Vec::<String>, u: u32) -> String) -> String {
-        let result = f("teststring".to_string(), vec![String::from("test1"), String::from("test2")], 42);
+    fn test_callback(f: fn(s: String, v: Vec<String>, u: u32) -> String) -> String {
+        let result = f(
+            "teststring".to_string(),
+            vec![String::from("test1"), String::from("test2")],
+            42,
+        );
         println!("Printing from Rust: {}", result);
 
         result
@@ -123,7 +128,6 @@ mod hello {
     //     f[1].clone()
     // }
 }
-
 
 /*
 #[pyclass]

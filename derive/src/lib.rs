@@ -1,17 +1,20 @@
 #![allow(unused_imports)]
 
-use proc_macro2::TokenStream as TokenStream2;
-use syn::{Ident, ItemStruct, ItemMod, ItemFn, Item, ImplItem, parse_macro_input, ItemImpl, Type, TypePath, ImplItemMethod, Fields, Attribute, Token, parse_quote};
-use syn::punctuated::Punctuated;
-use syn::parse::Parser;
 use proc_macro::TokenStream;
+use proc_macro2::TokenStream as TokenStream2;
 use quote::{quote, ToTokens};
+use syn::parse::Parser;
+use syn::punctuated::Punctuated;
+use syn::{
+    parse_macro_input, parse_quote, Attribute, Fields, Ident, ImplItem, ImplItemMethod, Item,
+    ItemFn, ItemImpl, ItemMod, ItemStruct, Token, Type, TypePath,
+};
 
 mod langs;
 mod types;
 
-use types::*;
 use langs::Lang;
+use types::*;
 
 #[cfg(feature = "c")]
 type CurrentLang = langs::c::C;
@@ -32,36 +35,56 @@ fn analyze_module(module: &mut ItemMod, mut path: Vec<Ident>) {
     for item in &mut module.content.as_mut().expect("Empty module").1 {
         match item {
             Item::Mod(inner_module) => {
-                if let Some(pos) = inner_module.attrs.iter().position(|a| a.path.is_ident("expose_mod")) {
+                if let Some(pos) = inner_module
+                    .attrs
+                    .iter()
+                    .position(|a| a.path.is_ident("expose_mod"))
+                {
                     inner_module.attrs.remove(pos);
                     analyze_module(inner_module, path.clone());
 
                     sub_items.push(ModuleItem::Module(inner_module.ident.clone()));
                 }
-            },
+            }
             Item::Fn(function) => {
-                if let Some(pos) = function.attrs.iter().position(|a| a.path.is_ident("expose_fn")) {
+                if let Some(pos) = function
+                    .attrs
+                    .iter()
+                    .position(|a| a.path.is_ident("expose_fn"))
+                {
                     function.attrs.remove(pos);
-                    sub_items.push(ModuleItem::Function(CurrentLang::expose_fn(function, &path).unwrap()));
+                    sub_items.push(ModuleItem::Function(
+                        CurrentLang::expose_fn(function, &path).unwrap(),
+                    ));
                 }
-            },
+            }
             Item::Struct(structure) => {
-                if let Some(pos) = structure.attrs.iter().position(|a| a.path.is_ident("expose_struct")) {
+                if let Some(pos) = structure
+                    .attrs
+                    .iter()
+                    .position(|a| a.path.is_ident("expose_struct"))
+                {
                     let parser = Punctuated::<ExposeStructOpts, Token![,]>::parse_terminated;
                     let opts = structure.attrs[pos].parse_args_with(parser).unwrap();
 
                     structure.attrs.remove(pos);
                     check_struct(structure);
 
-                    sub_items.push(ModuleItem::Structure(CurrentLang::expose_struct(structure, opts, &path).unwrap()));
+                    sub_items.push(ModuleItem::Structure(
+                        CurrentLang::expose_struct(structure, opts, &path).unwrap(),
+                    ));
                 }
-            },
+            }
             Item::Impl(implementation) => {
-                if let Some(pos) = implementation.attrs.iter().position(|a| a.path.is_ident("expose_impl")) {
+                if let Some(pos) = implementation
+                    .attrs
+                    .iter()
+                    .position(|a| a.path.is_ident("expose_impl"))
+                {
                     implementation.attrs.remove(pos);
                     CurrentLang::expose_impl(implementation, &path).unwrap();
                 }
-            },
+            }
             _ => {}
         }
     }
@@ -76,7 +99,8 @@ pub fn expose_mod(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     (quote! {
         #input
-    }).into()
+    })
+    .into()
 }
 
 #[proc_macro_attribute]
@@ -86,7 +110,8 @@ pub fn expose_fn(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     (quote! {
         #input
-    }).into()
+    })
+    .into()
 }
 
 #[proc_macro_attribute]
@@ -95,7 +120,7 @@ pub fn expose_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
     check_struct(&input);
 
     let attr: TokenStream2 = attr.into();
-    let attr: Attribute = parse_quote!{ #attr };
+    let attr: Attribute = parse_quote! { #attr };
 
     let parser = Punctuated::<ExposeStructOpts, Token![,]>::parse_terminated;
     let opts = attr.parse_args_with(parser).unwrap();
@@ -104,7 +129,8 @@ pub fn expose_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     (quote! {
         #input
-    }).into()
+    })
+    .into()
 }
 
 #[proc_macro_attribute]
@@ -114,5 +140,6 @@ pub fn expose_impl(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     (quote! {
         #input
-    }).into()
+    })
+    .into()
 }

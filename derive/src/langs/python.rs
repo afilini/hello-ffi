@@ -1,11 +1,14 @@
-use std::fmt;
 use std::convert::TryFrom;
+use std::fmt;
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
-use quote::{TokenStreamExt, ToTokens, quote};
-use syn::{ItemFn, Ident, FnArg, parse_quote, Pat, PatType, PatIdent, Item, Attribute, ImplItemMethod, ImplItem, Token};
+use quote::{quote, ToTokens, TokenStreamExt};
 use syn::punctuated::Punctuated;
+use syn::{
+    parse_quote, Attribute, FnArg, Ident, ImplItem, ImplItemMethod, Item, ItemFn, Pat, PatIdent,
+    PatType, Token,
+};
 
 use super::*;
 
@@ -22,7 +25,8 @@ impl Lang for Python {
 
         let ident = &function.sig.ident;
         let (mut inputs, input_conversion) = Self::convert_fn_args(function.sig.inputs.clone())?;
-        let (output_type, extra_args, output_conversion) = Self::convert_output(function.sig.output.clone())?;
+        let (output_type, extra_args, output_conversion) =
+            Self::convert_output(function.sig.output.clone())?;
         let block = &function.block;
 
         inputs.extend(extra_args);
@@ -46,7 +50,11 @@ impl Lang for Python {
         Ok(function.sig.ident.clone())
     }
 
-    fn expose_mod(module: &mut ItemMod, mod_path: &Vec<Ident>, sub_items: Vec<ModuleItem>) -> Result<Ident, Self::Error> {
+    fn expose_mod(
+        module: &mut ItemMod,
+        mod_path: &Vec<Ident>,
+        sub_items: Vec<ModuleItem>,
+    ) -> Result<Ident, Self::Error> {
         let ident = &module.ident;
         let content = &mut module.content.as_mut().expect("Empty module").1;
 
@@ -60,12 +68,12 @@ impl Lang for Python {
                     quote! {
                         m.add_function(pyo3::wrap_pyfunction!(#ident, m)?)?;
                     }
-                },
+                }
                 ModuleItem::Structure(ident) => {
                     quote! {
                         m.add_class::<#ident>()?;
                     }
-                },
+                }
                 ModuleItem::Module(ident) => {
                     let ident_str = ident.to_string();
                     quote! {
@@ -73,7 +81,7 @@ impl Lang for Python {
                         #ident::#ident(py, submod)?;
                         m.add_submodule(submod)?;
                     }
-                },
+                }
             };
 
             export_tokens.extend(tokens);
@@ -99,14 +107,25 @@ impl Lang for Python {
         Ok(module.ident.clone())
     }
 
-    fn expose_struct(structure: &mut ItemStruct, opts: Punctuated<ExposeStructOpts, Token![,]>, mod_path: &Vec<Ident>) -> Result<Ident, Self::Error> {
-        structure.attrs.push(parse_quote!( #[pyo3::prelude::pyclass] ));
+    fn expose_struct(
+        structure: &mut ItemStruct,
+        opts: Punctuated<ExposeStructOpts, Token![,]>,
+        mod_path: &Vec<Ident>,
+    ) -> Result<Ident, Self::Error> {
+        structure
+            .attrs
+            .push(parse_quote!( #[pyo3::prelude::pyclass] ));
 
         Ok(structure.ident.clone())
     }
 
-    fn expose_impl(implementation: &mut ItemImpl, mod_path: &Vec<Ident>) -> Result<(), Self::Error> {
-        implementation.attrs.push(parse_quote!( #[pyo3::prelude::pymethods] ));
+    fn expose_impl(
+        implementation: &mut ItemImpl,
+        mod_path: &Vec<Ident>,
+    ) -> Result<(), Self::Error> {
+        implementation
+            .attrs
+            .push(parse_quote!( #[pyo3::prelude::pymethods] ));
 
         // remove items marked as "destructors" because pyo3 handles them automatically
         implementation.items.retain(|item| {
@@ -131,41 +150,46 @@ impl Lang for Python {
                 match sig.inputs.first() {
                     // the first argument is not some kind of "self", so this is a static method
                     None | Some(FnArg::Typed(_)) => attrs.push(parse_quote!( #[staticmethod] )),
-                    _ => {},
+                    _ => {}
                 }
-
             }
         }
 
         Ok(())
     }
 
-    fn convert_arg(arg: FnArg, dt: DataTypeIn, arg_name: Option<Ident>) -> Result<(Vec<FnArg>, TokenStream), Self::Error> {
+    fn convert_arg(
+        arg: FnArg,
+        dt: DataTypeIn,
+        arg_name: Option<Ident>,
+    ) -> Result<(Vec<FnArg>, TokenStream), Self::Error> {
         match dt {
             DataTypeIn::SelfRef => Ok((vec![parse_quote!(&self)], TokenStream::default())),
             DataTypeIn::SelfMutRef => Ok((vec![parse_quote!(&mut self)], TokenStream::default())),
             DataTypeIn::String => {
                 let arg_name = arg_name.expect("Missing `arg_name`");
 
-                Ok((vec![parse_quote!(#arg_name: String)], TokenStream::default()))
-            },
+                Ok((
+                    vec![parse_quote!(#arg_name: String)],
+                    TokenStream::default(),
+                ))
+            }
             DataTypeIn::SelfValue => {
                 let arg_name = arg_name.expect("Missing `arg_name`");
 
                 Ok((vec![parse_quote!(#arg_name: Self)], TokenStream::default()))
-            },
-
+            }
         }
     }
 
     fn convert_output(output: ReturnType) -> Result<(Type, Vec<FnArg>, TokenStream), Self::Error> {
         let output_type = match output {
             ReturnType::Default => {
-                let out = parse_quote!( () );
-                let conv = (quote!( () )).into();
+                let out = parse_quote!(());
+                let conv = (quote!(())).into();
 
                 return Ok((out, vec![], conv));
-            },
+            }
             ReturnType::Type(_, ty) => *ty,
         };
 
@@ -174,7 +198,8 @@ impl Lang for Python {
                 let out = parse_quote!(String);
                 let conv = (quote! {
                     output
-                }).into();
+                })
+                .into();
 
                 Ok((out, vec![], conv))
             }
@@ -182,7 +207,8 @@ impl Lang for Python {
                 let out = parse_quote!(Self);
                 let conv = (quote! {
                     output
-                }).into();
+                })
+                .into();
 
                 Ok((out, vec![], conv))
             }

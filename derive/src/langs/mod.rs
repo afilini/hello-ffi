@@ -2,10 +2,14 @@ use std::convert::TryFrom;
 use std::fmt;
 
 use proc_macro::TokenStream;
-use syn::{ItemFn, Ident, Path, FnArg, parse_quote, Pat, PatType, PatIdent, Type, ReturnType, ItemMod, ItemStruct, ItemImpl, Token, Lit, LitStr, PathArguments, ParenthesizedGenericArguments};
 use syn::parse::{Parse, ParseStream};
-use syn::token::Comma;
 use syn::punctuated::Punctuated;
+use syn::token::Comma;
+use syn::{
+    parse_quote, FnArg, Ident, ItemFn, ItemImpl, ItemMod, ItemStruct, Lit, LitStr,
+    ParenthesizedGenericArguments, Pat, PatIdent, PatType, Path, PathArguments, ReturnType, Token,
+    Type,
+};
 
 use crate::types::*;
 
@@ -19,11 +23,20 @@ pub trait Lang {
 
     fn expose_fn(function: &mut ItemFn, mod_path: &Vec<Ident>) -> Result<Ident, Self::Error>;
 
-    fn expose_mod(module: &mut ItemMod, mod_path: &Vec<Ident>, sub_items: Vec<ModuleItem>) -> Result<Ident, Self::Error>;
+    fn expose_mod(
+        module: &mut ItemMod,
+        mod_path: &Vec<Ident>,
+        sub_items: Vec<ModuleItem>,
+    ) -> Result<Ident, Self::Error>;
 
-    fn expose_struct(structure: &mut ItemStruct, opts: Punctuated<ExposeStructOpts, Token![,]>, mod_path: &Vec<Ident>) -> Result<Ident, Self::Error>;
+    fn expose_struct(
+        structure: &mut ItemStruct,
+        opts: Punctuated<ExposeStructOpts, Token![,]>,
+        mod_path: &Vec<Ident>,
+    ) -> Result<Ident, Self::Error>;
 
-    fn expose_impl(implementation: &mut ItemImpl, mod_path: &Vec<Ident>) -> Result<(), Self::Error>;
+    fn expose_impl(implementation: &mut ItemImpl, mod_path: &Vec<Ident>)
+        -> Result<(), Self::Error>;
 
     fn convert_input(ty: Type) -> Result<Input, Self::Error>;
 
@@ -76,4 +89,3 @@ impl fmt::Display for LangError {
 }
 
 impl std::error::Error for LangError {}
-
