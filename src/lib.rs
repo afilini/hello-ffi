@@ -8,49 +8,101 @@ compile_error!("Enable at most one language");
 #[cfg(all(feature = "python", any(feature = "c")))]
 compile_error!("Enable at most one language");
 
+pub trait MapFrom<Source> {
+    fn map_from(s: Source) -> Self;
+}
+
+impl MapFrom<*const libc::c_char> for String {
+    fn map_from(s: *const libc::c_char) -> Self {
+        unsafe {
+            std::ffi::CStr::from_ptr(s).to_str().expect("Invalid incoming string").to_string()
+        }
+    }
+}
+
+impl<T> MapFrom<T> for T {
+    #[inline]
+    fn map_from(s: T) -> Self {
+        s
+    }
+}
+
+impl<F: Clone, T: MapFrom<F>> MapFrom<(*const F, usize)> for Vec<T> {
+    fn map_from((ptr, len): (*const F, usize)) -> Self {
+        let slice = unsafe {
+            std::slice::from_raw_parts(ptr, len)
+        };
+        slice.to_vec().into_iter().map(T::map_from).collect()
+    }
+}
+
+pub trait MapTo<Target> {
+    fn map_to(self) -> Target;
+}
+
+impl MapTo<*mut libc::c_char> for String {
+    fn map_to(self) -> *mut libc::c_char {
+        let cstring = std::ffi::CString::new(self).expect("Invalid outgoing string");
+        let ptr = cstring.as_ptr();
+        std::mem::forget(cstring);
+
+        ptr as *mut libc::c_char
+    }
+}
+
 #[expose_mod]
 mod hello {
-    #[expose_mod]
-    mod inner {
-    }
+    // #[expose_mod]
+    // mod inner {
+    // }
 
-    #[expose_struct("opaque")]
-    pub struct HelloStruct {
-        inner: hello::HelloStruct
-    }
+    // #[expose_struct("opaque")]
+    // pub struct HelloStruct {
+    //     inner: hello::HelloStruct
+    // }
 
-    #[expose_impl]
-    impl HelloStruct {
-        #[constructor]
-        fn hello_struct_new(init: String) -> Self {
-            HelloStruct {
-                inner: hello::HelloStruct {
-                    init
-                }
-            }
-        }
+    // #[expose_impl]
+    // impl HelloStruct {
+    //     #[constructor]
+    //     fn hello_struct_new(init: String) -> Self {
+    //         HelloStruct {
+    //             inner: hello::HelloStruct {
+    //                 init
+    //             }
+    //         }
+    //     }
 
-        fn hello_static(a: String) -> String {
-            hello::HelloStruct::hello_static(a.as_str()).to_string()
-        }
+    //     fn hello_static(a: String) -> String {
+    //         hello::HelloStruct::hello_static(a.as_str()).to_string()
+    //     }
 
-        #[destructor]
-        fn hello_struct_destroy(s: Self) {
-        }
+    //     #[destructor]
+    //     fn hello_struct_destroy(_s: Self) {
+    //     }
 
-        fn hello_method(&self, a: String) -> String {
-            self.inner.hello_method(a.as_str())
-        }
+    //     fn hello_method(&self, a: String) -> String {
+    //         self.inner.hello_method(a.as_str())
+    //     }
 
-        fn get_init(&self) -> String {
-            self.inner.init.clone()
-        }
-    }
+    //     fn get_init(&self) -> String {
+    //         self.inner.init.clone()
+    //     }
+    // }
 
     #[expose_fn]
-    fn test_pure_fn(f: String) {
-        println!("Printing from Rust: {}", f);
+    fn test_callback(f: fn(String, Vec::<u32>, u32) -> String) -> String {
+        let result = f("teststring".to_string(), "str2".to_string(), 42);
+        println!("Printing from Rust: {}", result);
+
+        result
     }
+
+    // #[expose_fn]
+    // fn test_pure_fn(f: Vec<String>) -> String {
+    //     println!("Printing from Rust: {}", f[0]);
+
+    //     f[1].clone()
+    // }
 }
 
 

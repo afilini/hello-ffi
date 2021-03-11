@@ -2,99 +2,17 @@ use std::convert::TryFrom;
 use std::fmt;
 
 use proc_macro::TokenStream;
-use syn::{ItemFn, Ident, Path, FnArg, parse_quote, Pat, PatType, PatIdent, Type, ReturnType, ItemMod, ItemStruct, ItemImpl, Token, Lit, LitStr};
+use syn::{ItemFn, Ident, Path, FnArg, parse_quote, Pat, PatType, PatIdent, Type, ReturnType, ItemMod, ItemStruct, ItemImpl, Token, Lit, LitStr, PathArguments, ParenthesizedGenericArguments};
 use syn::parse::{Parse, ParseStream};
 use syn::token::Comma;
 use syn::punctuated::Punctuated;
+
+use crate::types::*;
 
 #[cfg(feature = "c")]
 pub mod c;
 #[cfg(feature = "python")]
 pub mod python;
-
-#[derive(Debug)]
-pub enum LangError {
-    UnknownFnArg(Box<FnArg>),
-    UnknownOutputType(Box<Type>),
-    ImplicitSelfValueNotSupported,
-}
-
-impl fmt::Display for LangError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl std::error::Error for LangError {}
-
-// TODO add useful info inside, like the arg name
-#[derive(Debug)]
-pub enum DataTypeIn {
-    SelfRef,
-    SelfMutRef,
-    SelfValue,
-
-    String,
-}
-
-impl TryFrom<&FnArg> for DataTypeIn {
-    type Error = LangError;
-
-    fn try_from(arg: &FnArg) -> Result<Self, Self::Error> {
-        Ok(match arg {
-            FnArg::Receiver(receiver) if receiver.reference.is_none() => return Err(LangError::ImplicitSelfValueNotSupported),
-            FnArg::Receiver(receiver) if receiver.mutability.is_none() => DataTypeIn::SelfRef,
-            FnArg::Receiver(receiver) if receiver.mutability.is_some() => DataTypeIn::SelfMutRef,
-            FnArg::Typed(typed) if typed.ty == parse_quote!(String) => DataTypeIn::String,
-            FnArg::Typed(typed) if typed.ty == parse_quote!(Self) => DataTypeIn::SelfValue,
-            x => return Err(LangError::UnknownFnArg(Box::new(x.clone())))
-        })
-    }
-}
-
-#[derive(Debug)]
-pub enum DataTypeOut {
-    String,
-
-    SelfValue,
-}
-
-#[derive(Debug)]
-pub enum ModuleItem {
-    Function(Ident),
-    Structure(Ident),
-    Module(Ident),
-}
-
-impl TryFrom<&Type> for DataTypeOut {
-    type Error = LangError;
-
-    fn try_from(output: &Type) -> Result<Self, Self::Error> {
-        if output == &parse_quote!(String) {
-            return Ok(DataTypeOut::String);
-        } else if output == &parse_quote!(Self) {
-            return Ok(DataTypeOut::SelfValue);
-        }
-
-        Err(LangError::UnknownOutputType(Box::new(output.clone())))
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExposeStructOpts {
-    Opaque,
-}
-
-impl Parse for ExposeStructOpts {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let lookahead = input.lookahead1();
-        if lookahead.peek(Lit) && input.peek(LitStr) && input.parse::<LitStr>().unwrap().value() == "opaque" {
-            Ok(ExposeStructOpts::Opaque)
-        } else {
-            Err(lookahead.error())
-        }
-    }
-}
 
 pub trait Lang {
     type Error: From<LangError> + std::error::Error;
@@ -107,38 +25,55 @@ pub trait Lang {
 
     fn expose_impl(implementation: &mut ItemImpl, mod_path: &Vec<Ident>) -> Result<(), Self::Error>;
 
-    fn convert_arg(arg: FnArg, dt: DataTypeIn, arg_name: Option<Ident>) -> Result<(Vec<FnArg>, TokenStream), Self::Error>;
+    fn convert_input(ty: Type) -> Result<Input, Self::Error>;
 
-    fn convert_output(output: ReturnType) -> Result<(Type, Vec<FnArg>, TokenStream), Self::Error>;
+    fn convert_output(output: Type) -> Result<Output, Self::Error>;
 
     // provided methods
-    fn convert_fn_args<I: IntoIterator<Item = FnArg>>(args: I) -> Result<(Punctuated<FnArg, Comma>, TokenStream), Self::Error> {
-        let (args, ts) = args.into_iter()
-            .map(|arg| {
-                let dt = DataTypeIn::try_from(&arg)?;
+    // fn convert_fn_args<I: IntoIterator<Item = FnArg>>(args: I) -> Result<(Punctuated<FnArg, Comma>, TokenStream), Self::Error> {
+    //     let (args, ts) = args.into_iter()
+    //         .map(|arg| {
+    //             let dt = DataTypeIn::try_from(&arg)?;
 
-                let arg_name = match &arg {
-                    FnArg::Typed(PatType { pat, .. }) => {
-                        if let Pat::Ident(PatIdent { ident, .. }) = *pat.clone() {
-                            Some(ident)
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                };
+    //             let arg_name = match &arg {
+    //                 FnArg::Typed(PatType { pat, .. }) => {
+    //                     if let Pat::Ident(PatIdent { ident, .. }) = *pat.clone() {
+    //                         Some(ident)
+    //                     } else {
+    //                         None
+    //                     }
+    //                 }
+    //                 _ => None,
+    //             };
 
-                Self::convert_arg(arg, dt, arg_name)
-            })
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .fold((vec![], TokenStream::default()), |(mut fold_args, mut fold_ts), (args, ts)| {
-                fold_args.extend(args.into_iter());
-                fold_ts.extend(ts);
+    //             Self::convert_arg(arg, dt, arg_name)
+    //         })
+    //         .collect::<Result<Vec<_>, _>>()?
+    //         .into_iter()
+    //         .fold((vec![], TokenStream::default()), |(mut fold_args, mut fold_ts), (args, ts)| {
+    //             fold_args.extend(args.into_iter());
+    //             fold_ts.extend(ts);
 
-                (fold_args, fold_ts)
-            });
+    //             (fold_args, fold_ts)
+    //         });
 
-        Ok((args.into_iter().collect(), ts))
+    //     Ok((args.into_iter().collect(), ts))
+    // }
+}
+
+#[derive(Debug)]
+pub enum LangError {
+    /// Complex pattern in function argument.
+    ///
+    /// Only basic patterns like `foo: u32` are supported
+    ComplexPatternFnArg,
+}
+
+impl fmt::Display for LangError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
+
+impl std::error::Error for LangError {}
+

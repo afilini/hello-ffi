@@ -1,7 +1,4 @@
-use std::fs::File;
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::env;
+#![allow(unused_imports)]
 
 use proc_macro2::TokenStream as TokenStream2;
 use syn::{Ident, ItemStruct, ItemMod, ItemFn, Item, ImplItem, parse_macro_input, ItemImpl, Type, TypePath, ImplItemMethod, Fields, Attribute, Token, parse_quote};
@@ -11,8 +8,11 @@ use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
 
 mod langs;
+mod types;
 
-use langs::{Lang, ModuleItem, ExposeStructOpts};
+use types::*;
+use langs::Lang;
+
 #[cfg(feature = "c")]
 type CurrentLang = langs::c::C;
 #[cfg(feature = "python")]

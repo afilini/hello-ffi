@@ -6,19 +6,31 @@
 //     return val + 4242;
 // }
 
+const char* from_c = "Hello From C!";
+
+const char *cb(char* s, char* s2, unsigned int val) {
+    printf("Printing from C: %s %s %u\n", s, s2, val);
+    return from_c;
+}
+
 int main() {
-    char *res = hello_static("World!");
-    printf("Result: '%s'\n", res);
-    free(res);
+    // char *res = hello_static("World!");
+    // printf("Result: '%s'\n", res);
+    // free(res);
 
-    struct HelloStruct *s;
-    hello_struct_new("C init str", &s);
-    res = hello_method(s, "StructWorld!");
-    printf("Result: '%s'\n", res);
-    free(res);
-    hello_struct_destroy(s);
+    // struct HelloStruct *s;
+    // hello_struct_new("C init str", &s);
+    // res = hello_method(s, "StructWorld!");
+    // printf("Result: '%s'\n", res);
+    // free(res);
+    // hello_struct_destroy(s);
 
-    test_pure_fn("AAAAAAAAAAAAAAHHHHHHHHHH");
+    // const char* list[] = {"AAAAAAAAAAAAAA", "BBBBBBBBBBBBBBBBBBBBB"};
+
+    // char* ret = test_pure_fn(list, 2);
+    // printf("Ret: %s\n", ret);
+    char *ret = test_callback(cb);
+    printf("Ret: %s\n", ret);
 
     // struct Wallet *wallet;
     // wallet_new("Wallet Name", &wallet);
