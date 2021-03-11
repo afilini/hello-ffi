@@ -247,10 +247,10 @@ impl Argument {
 pub enum Output {
     /// Leave the type unchanged, doesn't perform any conversion
     Unchanged(Box<Type>),
-    /// Map to another type. This will call `MapTo::map_to()`
+    /// Map to another one or more types. This will call `MapTo::map_to()`
     MapTo {
         original: Box<Type>,
-        target: Box<Type>
+        targets: Vec<(Box<Type>, String)>,
     },
     /// Move the value to the heap and return a pointer
     ByReference(Box<Type>),
@@ -290,7 +290,8 @@ impl ExpandedOutputConversion {
 
 #[derive(Debug)]
 pub struct ExpandedOutput {
-    pub ty: Box<Type>,
+    pub ty: Vec<Box<Type>>,
+    pub suffix: Vec<String>,
     pub conv: ExpandedOutputConversion,
 }
 
@@ -299,10 +300,26 @@ impl Output {
         Output::Unchanged(Box::new(ty))
     }
 
-    pub fn new_map_to(original: Type, target: Type) -> Self {
+    pub fn new_map_to_suffix(original: Type, targets: Vec<(Type, String)>) -> Self {
         Output::MapTo {
             original: Box::new(original),
-            target: Box::new(target),
+            targets: targets.into_iter().map(|(t, s)| (Box::new(t), s)).collect(),
+        }
+    }
+
+    pub fn new_map_to(original: Type, targets: Vec<Type>) -> Self {
+        Self::new_map_to_suffix(original, targets.into_iter().enumerate().map(|(i, t)| (t, i.to_string())).collect())
+    }
+
+    pub fn new_map_to_single(original: Type, target: Type) -> Self {
+        Self::new_map_to_suffix(original, vec![(target, String::new())])
+    }
+
+
+    pub fn get_targets(&self) -> Vec<Box<Type>> {
+        match self {
+            Output::Unchanged(ty) | Output::ByReference(ty) => vec![ty.clone()],
+            Output::MapTo { targets, .. } => targets.iter().map(|(t, _)| t.clone()).collect(),
         }
     }
 
@@ -310,19 +327,24 @@ impl Output {
         match self {
             Output::Unchanged(ty) => {
                 ExpandedOutput {
-                    ty: ty.clone(),
+                    ty: vec![ty.clone()],
+                    suffix: vec![String::new()],
                     conv: ExpandedOutputConversion::pass_through(ident),
                 }
             },
-            Output::MapTo { original, target } => {
+            Output::MapTo { original, targets } => {
+                let (targets, suffix) = targets.iter().cloned().unzip();
+
                 ExpandedOutput {
-                    ty: target.clone(),
+                    ty: targets,
+                    suffix,
                     conv: ExpandedOutputConversion::map_to(ident, &original),
                 }
             },
             Output::ByReference(ty) => {
                 ExpandedOutput {
-                    ty: parse_quote!{ *mut #ty },
+                    ty: vec![parse_quote!{ *mut #ty }],
+                    suffix: vec![String::new()],
                     conv: ExpandedOutputConversion::by_reference(ident),
                 }
             },
@@ -335,12 +357,6 @@ pub struct Return(pub ReturnType);
 
 #[derive(Debug)]
 pub struct ExpandedReturnConversion(TokenStream2);
-
-impl ExpandedReturnConversion {
-    pub fn empty() -> Self {
-        ExpandedReturnConversion(TokenStream2::default())
-    }
-}
 
 #[derive(Debug)]
 pub struct ExpandedReturn {
@@ -358,10 +374,12 @@ impl Return {
         let ty = self.0.as_type();
         let converted = convert_output(ty)?;
 
-        let ExpandedOutput { ty, conv } = converted.expand(&ident);
+        let ExpandedOutput { ty, conv, .. } = converted.expand(&ident);
+        let ty = ty.into_iter().map(|t| *t).as_tuple();
+
         match converted {
             Output::ByReference(_) => {
-                let extra_arg = parse_quote!(#arg_name: *mut #ty);
+                let extra_arg = parse_quote!(#arg_name: #ty);
 
                 Ok(ExpandedReturn {
                     ret: ReturnType::Default,
@@ -373,9 +391,9 @@ impl Return {
             },
             _ => {
                 Ok(ExpandedReturn {
-                    ret: ReturnType::Type(Default::default(), ty),
+                    ret: ReturnType::Type(Default::default(), Box::new(ty)),
                     extra_args: vec![],
-                    conv: ExpandedReturnConversion::empty(),
+                    conv: ExpandedReturnConversion::from(conv.into_inner()),
                 })
             },
         }
@@ -388,44 +406,81 @@ pub struct CallbackArgument(pub BareFnArg);
 #[derive(Debug)]
 pub struct ExpandedCallbackArgumentConversion(TokenStream2);
 
+impl ExpandedCallbackArgumentConversion {
+    fn group_sub_args(ident: &Ident, arg_names: Vec<Ident>, original: ExpandedOutputConversion) -> Self {
+        let grouped = arg_names.into_iter().collect::<Punctuated<_, Comma>>();
+        let original = original.into_inner();
+
+        let ts = quote! {
+            #original
+            let (#grouped) = #ident;
+        };
+        ts.into()
+    }
+}
+
 #[derive(Debug)]
 pub struct ExpandedCallbackArgument {
     pub args: Vec<BareFnArg>,
-    pub conv: ExpandedReturnConversion,
+    pub conv: ExpandedCallbackArgumentConversion,
 }
 
 impl CallbackArgument {
-    pub fn expand<F, E>(self, prefix: &str, convert_output: F) -> Result<ExpandedCallbackArgument, E>
+    pub fn expand<F, E>(self, ident: &Ident, convert_output: F) -> Result<ExpandedCallbackArgument, E>
     where
         E: From<LangError>,
         F: Fn(Type) -> Result<Output, E>,
     {
         let converted = convert_output(self.0.ty)?;
 
-        let ExpandedOutput { ty, conv } = converted.expand(&ident);
-        match converted {
-            Output::ByReference(_) => {
-                let extra_arg = parse_quote!(#arg_name: *mut #ty);
+        let ExpandedOutput { ty, suffix, conv } = converted.expand(&ident);
+        let (args, arg_names): (Vec<_>, Vec<_>) = ty.into_iter().zip(suffix.into_iter()).map(|(t, s)| {
+            let arg_name = match s.is_empty() {
+                true => ident.clone(),
+                false => format_ident!("{}_{}", ident, s)
+            };
 
-                Ok(ExpandedReturn {
-                    ret: ReturnType::Default,
-                    extra_args: vec![extra_arg],
-                    conv: ExpandedReturnConversion::from(quote! {
-                        *#arg_name = #ident; 
-                    }),
-                })
-            },
-            _ => {
-                Ok(ExpandedReturn {
-                    ret: ReturnType::Type(Default::default(), ty),
-                    extra_args: vec![],
-                    conv: ExpandedReturnConversion::empty(),
-                })
-            },
-        }
+            (parse_quote!(#arg_name: #t), arg_name)
+        }).unzip();
+
+        Ok(ExpandedCallbackArgument {
+            args,
+            conv: ExpandedCallbackArgumentConversion::group_sub_args(ident, arg_names, conv),
+        })
     }
 }
 
+#[derive(Debug)]
+pub struct CallbackReturn(pub ReturnType);
+
+#[derive(Debug)]
+pub struct ExpandedCallbackReturnConversion(TokenStream2);
+
+#[derive(Debug)]
+pub struct ExpandedCallbackReturn {
+    pub ret: ReturnType,
+    pub conv: ExpandedCallbackReturnConversion,
+}
+
+impl CallbackReturn {
+    pub fn expand<F, E>(self, ident: &Ident, convert_input: F) -> Result<ExpandedCallbackReturn, E>
+    where
+        E: From<LangError>,
+        F: Fn(Type) -> Result<Input, E>,
+    {
+        let expanded = convert_input(self.0.as_type())?.expand(&ident);
+
+        let ret = match expanded.types.is_empty() {
+            true => ReturnType::Default,
+            false => ReturnType::Type(Default::default(), Box::new(expanded.types.into_iter().map(|t| *t).as_tuple()))
+        };
+
+        Ok(ExpandedCallbackReturn {
+            ret,
+            conv: ExpandedCallbackReturnConversion::from(expanded.conv.into_inner()),
+        })
+    }
+}
 
 macro_rules! impl_common_traits {
     ($ty:ident) => {
@@ -463,3 +518,4 @@ impl_common_traits!(ExpandedArgumentConversion);
 impl_common_traits!(ExpandedOutputConversion);
 impl_common_traits!(ExpandedReturnConversion);
 impl_common_traits!(ExpandedCallbackArgumentConversion);
+impl_common_traits!(ExpandedCallbackReturnConversion);

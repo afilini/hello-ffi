@@ -40,6 +40,13 @@ pub trait MapTo<Target> {
     fn map_to(self) -> Target;
 }
 
+impl<T> MapTo<T> for T {
+    #[inline]
+    fn map_to(self) -> T {
+        self
+    }
+}
+
 impl MapTo<*mut libc::c_char> for String {
     fn map_to(self) -> *mut libc::c_char {
         let cstring = std::ffi::CString::new(self).expect("Invalid outgoing string");
@@ -47,6 +54,18 @@ impl MapTo<*mut libc::c_char> for String {
         std::mem::forget(cstring);
 
         ptr as *mut libc::c_char
+    }
+}
+
+impl<F: Clone, T: MapTo<F>> MapTo<(*mut F, usize)> for Vec<T> {
+    fn map_to(self) -> (*mut F, usize) {
+        let mut mapped: Vec<F> = self.into_iter().map(T::map_to).collect();
+        mapped.shrink_to_fit();
+
+        let result = (mapped.as_mut_ptr(), mapped.len());
+        std::mem::forget(mapped);
+
+        result
     }
 }
 
@@ -90,8 +109,8 @@ mod hello {
     // }
 
     #[expose_fn]
-    fn test_callback(f: fn(String, Vec::<u32>, u32) -> String) -> String {
-        let result = f("teststring".to_string(), "str2".to_string(), 42);
+    fn test_callback(f: fn(s: String, v: Vec::<String>, u: u32) -> String) -> String {
+        let result = f("teststring".to_string(), vec![String::from("test1"), String::from("test2")], 42);
         println!("Printing from Rust: {}", result);
 
         result

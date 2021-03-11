@@ -8,8 +8,15 @@
 
 const char* from_c = "Hello From C!";
 
-const char *cb(char* s, char* s2, unsigned int val) {
-    printf("Printing from C: %s %s %u\n", s, s2, val);
+const char *cb(char* s, char* arr[], size_t arr_len, unsigned int val) {
+    printf("Printing from C: `%s`, val: `%u`\n", s, val);
+    for (size_t i = 0; i < arr_len; i++) {
+        printf(" > %s\n", arr[i]);
+    }
+
+    free(s);
+    free(arr);
+
     return from_c;
 }
 
