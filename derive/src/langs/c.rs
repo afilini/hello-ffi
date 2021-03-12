@@ -43,26 +43,7 @@ impl Lang for C {
 
         let ident = &function.sig.ident;
 
-        let (mut args, input_conversion) = function
-            .sig
-            .inputs
-            .clone()
-            .into_iter()
-            .map(|i| Argument(i).expand(Self::convert_input))
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .fold(
-                (
-                    Punctuated::<FnArg, Comma>::default(),
-                    TokenStream2::default(),
-                ),
-                |(mut fold_args, mut fold_conv), ExpandedArgument { args, conv }| {
-                    fold_args.extend(args);
-                    fold_conv.extend(conv.into_inner());
-
-                    (fold_args, fold_conv)
-                },
-            );
+        let (mut args, input_conversion) = Self::convert_fn_args(function.sig.inputs.clone())?;
 
         let ExpandedReturn {
             ret,

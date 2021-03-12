@@ -2,6 +2,7 @@ use std::convert::TryFrom;
 use std::fmt;
 
 use proc_macro::TokenStream;
+use proc_macro2::TokenStream as TokenStream2;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
@@ -43,35 +44,27 @@ pub trait Lang {
     fn convert_output(output: Type) -> Result<Output, Self::Error>;
 
     // provided methods
-    // fn convert_fn_args<I: IntoIterator<Item = FnArg>>(args: I) -> Result<(Punctuated<FnArg, Comma>, TokenStream), Self::Error> {
-    //     let (args, ts) = args.into_iter()
-    //         .map(|arg| {
-    //             let dt = DataTypeIn::try_from(&arg)?;
+    fn convert_fn_args<I: IntoIterator<Item = FnArg>>(
+        args: I,
+    ) -> Result<(Punctuated<FnArg, Comma>, TokenStream2), Self::Error> {
+        Ok(args
+            .into_iter()
+            .map(|i| Argument(i).expand(Self::convert_input))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .fold(
+                (
+                    Punctuated::<FnArg, Comma>::default(),
+                    TokenStream2::default(),
+                ),
+                |(mut fold_args, mut fold_conv), ExpandedArgument { args, conv }| {
+                    fold_args.extend(args);
+                    fold_conv.extend(conv.into_inner());
 
-    //             let arg_name = match &arg {
-    //                 FnArg::Typed(PatType { pat, .. }) => {
-    //                     if let Pat::Ident(PatIdent { ident, .. }) = *pat.clone() {
-    //                         Some(ident)
-    //                     } else {
-    //                         None
-    //                     }
-    //                 }
-    //                 _ => None,
-    //             };
-
-    //             Self::convert_arg(arg, dt, arg_name)
-    //         })
-    //         .collect::<Result<Vec<_>, _>>()?
-    //         .into_iter()
-    //         .fold((vec![], TokenStream::default()), |(mut fold_args, mut fold_ts), (args, ts)| {
-    //             fold_args.extend(args.into_iter());
-    //             fold_ts.extend(ts);
-
-    //             (fold_args, fold_ts)
-    //         });
-
-    //     Ok((args.into_iter().collect(), ts))
-    // }
+                    (fold_args, fold_conv)
+                },
+            ))
+    }
 }
 
 #[derive(Debug)]

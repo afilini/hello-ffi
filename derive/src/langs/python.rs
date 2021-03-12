@@ -3,7 +3,7 @@ use std::fmt;
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
-use quote::{quote, ToTokens, TokenStreamExt};
+use quote::{format_ident, quote, ToTokens, TokenStreamExt};
 use syn::punctuated::Punctuated;
 use syn::{
     parse_quote, Attribute, FnArg, Ident, ImplItem, ImplItemMethod, Item, ItemFn, Pat, PatIdent,
@@ -11,6 +11,7 @@ use syn::{
 };
 
 use super::*;
+use crate::types::*;
 
 #[derive(Debug)]
 pub struct Python;
@@ -24,24 +25,31 @@ impl Lang for Python {
         }
 
         let ident = &function.sig.ident;
-        let (mut inputs, input_conversion) = Self::convert_fn_args(function.sig.inputs.clone())?;
-        let (output_type, extra_args, output_conversion) =
-            Self::convert_output(function.sig.output.clone())?;
+
+        let (mut args, input_conversion) = Self::convert_fn_args(function.sig.inputs.clone())?;
+
+        let ExpandedReturn {
+            ret,
+            extra_args,
+            conv: output_conversion,
+        } = Return(function.sig.output.clone()).expand(
+            &format_ident!("__output"),
+            &format_ident!("__ptr_out"),
+            Self::convert_output,
+        )?;
+        args.extend(extra_args);
+
         let block = &function.block;
 
-        inputs.extend(extra_args);
-
-        let input_conversion = TokenStream2::from(input_conversion);
-        let output_conversion = TokenStream2::from(output_conversion);
-
         let ident_str = ident.to_string();
-
         *function = parse_quote! {
             #[pyo3::prelude::pyfunction]
-            fn #ident(#inputs) -> #output_type {
+            fn #ident(#args) #ret {
+                use crate::{MapTo, MapFrom};
+
                 #input_conversion
 
-                let output = { #block };
+                let __output = { #block };
 
                 #output_conversion
             }
@@ -158,61 +166,36 @@ impl Lang for Python {
         Ok(())
     }
 
-    fn convert_arg(
-        arg: FnArg,
-        dt: DataTypeIn,
-        arg_name: Option<Ident>,
-    ) -> Result<(Vec<FnArg>, TokenStream), Self::Error> {
-        match dt {
-            DataTypeIn::SelfRef => Ok((vec![parse_quote!(&self)], TokenStream::default())),
-            DataTypeIn::SelfMutRef => Ok((vec![parse_quote!(&mut self)], TokenStream::default())),
-            DataTypeIn::String => {
-                let arg_name = arg_name.expect("Missing `arg_name`");
+    fn convert_input(ty: Type) -> Result<Input, Self::Error> {
+        if let Type::BareFn(ref bare_fn) = ty {
+            let inputs = bare_fn.inputs.clone();
+            let output = bare_fn.output.clone();
 
-                Ok((
-                    vec![parse_quote!(#arg_name: String)],
-                    TokenStream::default(),
-                ))
-            }
-            DataTypeIn::SelfValue => {
-                let arg_name = arg_name.expect("Missing `arg_name`");
+            let args_names = bare_fn
+                .inputs
+                .iter()
+                .map(|arg| arg.name.clone().unwrap().0)
+                .collect::<Punctuated<Ident, Comma>>();
 
-                Ok((vec![parse_quote!(#arg_name: Self)], TokenStream::default()))
-            }
+            Ok(Input::new_custom(
+                ty,
+                vec![parse_quote!(crate::python_callback::PyCb<'_>)],
+                move |_, ident| {
+                    let ts = quote! {
+                        |#inputs| #output {
+                            #ident.call1( (#args_names) ).unwrap().extract().unwrap()
+                        }
+                    };
+                    ts.into()
+                },
+            ))
+        } else {
+            Ok(Input::new_unchanged(ty))
         }
     }
 
-    fn convert_output(output: ReturnType) -> Result<(Type, Vec<FnArg>, TokenStream), Self::Error> {
-        let output_type = match output {
-            ReturnType::Default => {
-                let out = parse_quote!(());
-                let conv = (quote!(())).into();
-
-                return Ok((out, vec![], conv));
-            }
-            ReturnType::Type(_, ty) => *ty,
-        };
-
-        match DataTypeOut::try_from(&output_type)? {
-            DataTypeOut::String => {
-                let out = parse_quote!(String);
-                let conv = (quote! {
-                    output
-                })
-                .into();
-
-                Ok((out, vec![], conv))
-            }
-            DataTypeOut::SelfValue => {
-                let out = parse_quote!(Self);
-                let conv = (quote! {
-                    output
-                })
-                .into();
-
-                Ok((out, vec![], conv))
-            }
-        }
+    fn convert_output(output: Type) -> Result<Output, Self::Error> {
+        Ok(Output::new_unchanged(output))
     }
 }
 
