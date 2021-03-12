@@ -21,8 +21,27 @@ impl Lang for C {
     type Error = CError;
 
     fn expose_fn(function: &mut ItemFn, mod_path: &Vec<Ident>) -> Result<Ident, Self::Error> {
+        if let Some(pos) = function
+            .attrs
+            .iter()
+            .position(|a| a.path.is_ident("destructor"))
+        {
+            // replace the type with `Destroy<T>`
+            function.attrs.remove(pos);
+
+            for input in &mut function.sig.inputs {
+                match input {
+                    FnArg::Typed(PatType { ty, .. }) => {
+                        *ty = Box::new(parse_quote!( Destroy<#ty> ));
+                    }
+                    FnArg::Receiver(_) => {
+                        return Err(CError::DestructorReceiverArgument(input.span()));
+                    }
+                }
+            }
+        }
+
         let ident = &function.sig.ident;
-        // let (mut inputs, input_conversion) = Self::convert_fn_args(function.sig.inputs.clone())?;
 
         let (mut args, input_conversion) = function
             .sig
@@ -60,15 +79,15 @@ impl Lang for C {
 
         *function = parse_quote! {
             #[no_mangle]
+            #[allow(non_snake_case)]
             pub extern "C" fn #ident(#args) #ret {
                 use crate::{MapFrom, MapTo};
+                use crate::c_destroy::Destroy;
 
                 #input_conversion
 
                 let __output = { #block };
                 #output_conversion
-
-                __output
             }
         };
 
@@ -151,6 +170,14 @@ impl Lang for C {
                 ty,
                 vec![parse_quote!(*const #sources), parse_quote!(usize)],
             ))
+        } else if let Some(inner) = match_generic_type(&ty, parse_quote!(Destroy)) {
+            let inner = Self::convert_input(inner)?;
+            let sources = inner
+                .get_sources()
+                .into_iter()
+                .collect::<Punctuated<_, Comma>>(); // TODO: as_tuple() ?
+
+            Ok(Input::new_map_from(ty, vec![parse_quote!(*mut #sources)]))
         } else if let Type::BareFn(ref old_bare_fn) = ty {
             if !old_bare_fn.inputs.iter().all(|arg| arg.name.is_some()) {
                 return Err(CError::UnnamedCallbackArguments(old_bare_fn.span()));
@@ -244,6 +271,7 @@ pub enum CError {
     Lang(LangError),
 
     UnnamedCallbackArguments(Span),
+    DestructorReceiverArgument(Span),
 }
 
 impl fmt::Display for CError {

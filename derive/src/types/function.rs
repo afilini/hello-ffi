@@ -380,6 +380,17 @@ pub struct Return(pub ReturnType);
 #[derive(Debug)]
 pub struct ExpandedReturnConversion(TokenStream2);
 
+impl ExpandedReturnConversion {
+    fn ret(ident: &Ident, conv: ExpandedOutputConversion) -> Self {
+        let ts = quote! {
+            #conv
+            #ident
+        };
+
+        ts.into()
+    }
+}
+
 #[derive(Debug)]
 pub struct ExpandedReturn {
     pub ret: ReturnType,
@@ -412,14 +423,15 @@ impl Return {
                     ret: ReturnType::Default,
                     extra_args: vec![extra_arg],
                     conv: ExpandedReturnConversion::from(quote! {
-                        *#arg_name = #ident;
+                        #conv
+                        unsafe { *#arg_name = #ident; }
                     }),
                 })
             }
             _ => Ok(ExpandedReturn {
                 ret: ReturnType::Type(Default::default(), Box::new(ty)),
                 extra_args: vec![],
-                conv: ExpandedReturnConversion::from(conv.into_inner()),
+                conv: ExpandedReturnConversion::ret(ident, conv),
             }),
         }
     }

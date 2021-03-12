@@ -70,44 +70,58 @@ impl<F: Clone, T: MapTo<F>> MapTo<(*mut F, usize)> for Vec<T> {
     }
 }
 
+#[cfg(feature = "c")]
+mod c_destroy {
+    pub struct Destroy<T>(*mut T);
+
+    impl<T> std::ops::Drop for Destroy<T> {
+        fn drop(&mut self) {
+            let _inner = unsafe { Box::from_raw(self.0) };
+        }
+    }
+
+    impl<T> super::MapFrom<*mut T> for Destroy<T> {
+        #[inline]
+        fn map_from(ptr: *mut T) -> Self {
+            Destroy(ptr)
+        }
+    }
+}
+
 #[expose_mod]
 mod hello {
-    // #[expose_mod]
-    // mod inner {
-    // }
+    #[expose_mod]
+    mod inner {}
 
-    // #[expose_struct("opaque")]
-    // pub struct HelloStruct {
-    //     inner: hello::HelloStruct
-    // }
+    #[expose_struct("opaque")]
+    pub struct HelloStruct {
+        inner: hello::HelloStruct,
+    }
 
-    // #[expose_impl]
-    // impl HelloStruct {
-    //     #[constructor]
-    //     fn hello_struct_new(init: String) -> Self {
-    //         HelloStruct {
-    //             inner: hello::HelloStruct {
-    //                 init
-    //             }
-    //         }
-    //     }
+    #[expose_impl]
+    impl HelloStruct {
+        #[constructor]
+        fn hello_struct_new(init: String) -> Self {
+            HelloStruct {
+                inner: hello::HelloStruct { init },
+            }
+        }
 
-    //     fn hello_static(a: String) -> String {
-    //         hello::HelloStruct::hello_static(a.as_str()).to_string()
-    //     }
+        fn hello_static(a: String) -> String {
+            hello::HelloStruct::hello_static(a.as_str()).to_string()
+        }
 
-    //     #[destructor]
-    //     fn hello_struct_destroy(_s: Self) {
-    //     }
+        #[destructor]
+        fn hello_struct_destroy(_s: Self) {}
 
-    //     fn hello_method(&self, a: String) -> String {
-    //         self.inner.hello_method(a.as_str())
-    //     }
+        fn hello_method(&self, a: String) -> String {
+            self.inner.hello_method(a.as_str())
+        }
 
-    //     fn get_init(&self) -> String {
-    //         self.inner.init.clone()
-    //     }
-    // }
+        fn get_init(&self) -> String {
+            self.inner.init.clone()
+        }
+    }
 
     #[expose_fn]
     fn test_callback(f: fn(s: String, v: Vec<String>, u: u32) -> String) -> String {
@@ -121,12 +135,12 @@ mod hello {
         result
     }
 
-    // #[expose_fn]
-    // fn test_pure_fn(f: Vec<String>) -> String {
-    //     println!("Printing from Rust: {}", f[0]);
+    #[expose_fn]
+    fn test_pure_fn(f: Vec<String>) -> String {
+        println!("Printing from Rust: {}", f[0]);
 
-    //     f[1].clone()
-    // }
+        f[1].clone()
+    }
 }
 
 /*

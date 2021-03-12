@@ -21,23 +21,26 @@ const char *cb(char* s, char* arr[], size_t arr_len, unsigned int val) {
 }
 
 int main() {
-    // char *res = hello_static("World!");
-    // printf("Result: '%s'\n", res);
-    // free(res);
+    char *res = hello_static("World!");
+    printf("Result: '%s'\n", res);
+    free(res);
 
-    // struct HelloStruct *s;
-    // hello_struct_new("C init str", &s);
-    // res = hello_method(s, "StructWorld!");
-    // printf("Result: '%s'\n", res);
-    // free(res);
-    // hello_struct_destroy(s);
+    struct HelloStruct *s;
+    hello_struct_new("C init str", &s);
+    res = hello_method(s, "StructWorld!");
+    printf("Result: '%s'\n", res);
+    free(res);
+    hello_struct_destroy(s);
 
-    // const char* list[] = {"AAAAAAAAAAAAAA", "BBBBBBBBBBBBBBBBBBBBB"};
+    const char* list[] = {"AAAAAAAAAAAAAA", "BBBBBBBBBBBBBBBBBBBBB"};
 
-    // char* ret = test_pure_fn(list, 2);
-    // printf("Ret: %s\n", ret);
-    char *ret = test_callback(cb);
+    char* ret = test_pure_fn(list, 2);
     printf("Ret: %s\n", ret);
+    free(ret);
+
+    char *ret2 = test_callback(cb);
+    printf("Ret: %s\n", ret2);
+    free(ret2);
 
     // struct Wallet *wallet;
     // wallet_new("Wallet Name", &wallet);
