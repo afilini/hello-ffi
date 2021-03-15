@@ -30,6 +30,14 @@ impl<T> MapTo<T> for T {
     }
 }
 
+pub trait IntoPlatformError {
+    type TargetType: std::fmt::Debug;
+
+    fn into_platform_error(self) -> Self::TargetType;
+
+    fn ok() -> Self::TargetType;
+}
+
 #[cfg(feature = "c")]
 mod c_mapping {
     use super::{MapFrom, MapTo};
@@ -93,6 +101,17 @@ mod c_destroy {
     }
 }
 
+#[cfg(feature = "c")]
+mod c_trait_utils {
+    #[inline]
+    pub fn take_ptr<I>(this: *mut libc::c_void) -> Box<I> {
+        unsafe { Box::from_raw(this as *mut I) }
+    }
+    pub trait IntoTraitStruct<T> {
+        fn into_trait_struct(self) -> T;
+    }
+}
+
 #[cfg(feature = "python")]
 mod python_callback {
     pub struct PyCb<'source>(&'source pyo3::PyAny);
@@ -120,57 +139,182 @@ mod python_callback {
 
 #[expose_mod]
 mod hello {
-    #[expose_mod]
-    mod inner {}
+    // #[expose_mod]
+    // mod inner {
+    // }
 
-    #[expose_struct("opaque")]
-    pub struct HelloStruct {
-        inner: hello::HelloStruct,
+    // #[expose_struct("opaque")]
+    // pub struct HelloStruct {
+    //     inner: hello::HelloStruct
+    // }
+
+    // #[expose_impl]
+    // impl HelloStruct {
+    //     #[constructor]
+    //     fn hello_struct_new(init: String) -> Self {
+    //         HelloStruct {
+    //             inner: hello::HelloStruct {
+    //                 init
+    //             }
+    //         }
+    //     }
+
+    //     fn hello_static(a: String) -> String {
+    //         hello::HelloStruct::hello_static(a.as_str()).to_string()
+    //     }
+
+    //     #[destructor]
+    //     fn hello_struct_destroy(_s: Self) {
+    //     }
+
+    //     fn hello_method(&self, a: String) -> String {
+    //         self.inner.hello_method(a.as_str())
+    //     }
+
+    //     fn get_init(&self) -> String {
+    //         self.inner.init.clone()
+    //     }
+    // }
+
+    // #[expose_fn]
+    // fn test_callback(f: fn(s: String, v: Vec<String>, u: u32) -> String) -> String {
+    //     let result = f(
+    //         "teststring".to_string(),
+    //         vec![String::from("test1"), String::from("test2")],
+    //         42,
+    //     );
+    //     println!("Printing from Rust: {}", result);
+
+    //     result
+    // }
+
+    #[derive(Debug)]
+    pub enum MyError {
+        StringTooLong,
     }
 
-    #[expose_impl]
-    impl HelloStruct {
-        #[constructor]
-        fn hello_struct_new(init: String) -> Self {
-            HelloStruct {
-                inner: hello::HelloStruct { init },
-            }
+    #[cfg(feature = "python")]
+    impl Into<pyo3::PyErr> for MyError {
+        fn into(self) -> pyo3::PyErr {
+            pyo3::exceptions::PyTypeError::new_err("Error message")
+        }
+    }
+
+    impl crate::IntoPlatformError for MyError {
+        type TargetType = i32;
+
+        fn into_platform_error(self) -> Self::TargetType {
+            -1
         }
 
-        fn hello_static(a: String) -> String {
-            hello::HelloStruct::hello_static(a.as_str()).to_string()
-        }
-
-        #[destructor]
-        fn hello_struct_destroy(_s: Self) {}
-
-        fn hello_method(&self, a: String) -> String {
-            self.inner.hello_method(a.as_str())
-        }
-
-        fn get_init(&self) -> String {
-            self.inner.init.clone()
+        fn ok() -> Self::TargetType {
+            0
         }
     }
 
     #[expose_fn]
-    fn test_callback(f: fn(s: String, v: Vec<String>, u: u32) -> String) -> String {
-        let result = f(
-            "teststring".to_string(),
-            vec![String::from("test1"), String::from("test2")],
-            42,
-        );
-        println!("Printing from Rust: {}", result);
-
-        result
-    }
-
-    #[expose_fn]
-    fn test_pure_fn(f: Vec<String>) -> String {
+    fn test_pure_fn(f: Vec<String>) -> Result<Vec<u32>, MyError> {
         println!("Printing from Rust: {}", f[0]);
 
-        f[1].clone()
+        if f[0].len() > 5 {
+            Err(MyError::StringTooLong)
+        } else {
+            Ok(vec![0, 1, 2])
+        }
     }
+
+    // External crate
+    // pub trait MyTrait {
+    //     fn method(&self);
+    // }
+    // struct ImplFromLib(u64);
+    // impl MyTrait for ImplFromLib {
+    //     fn method(&self) {
+    //         println!("Called `method()` on `ImplFromLib({})`", self.0);
+    //     }
+    // }
+
+    // // Defined manually
+    // // #[expose_trait]
+    // pub trait MyTraitWrapper {
+    //     fn _wrapper_method(&self);
+    // }
+    // impl<T: MyTrait> MyTraitWrapper for T {
+    //     fn _wrapper_method(&self) {
+    //         self.method()
+    //     }
+    // }
+    // #[expose_impl]
+    // impl MyTraitStruct {
+    //     fn my_trait_impl_from_lib_new(value: u64) -> Self {
+    //         use crate::c_trait_utils::IntoTraitStruct;
+
+    //         ImplFromLib(value).into_trait_struct()
+    //     }
+    // }
+
+    // // Automatically generated
+    // #[expose_struct("opaque")]
+    // pub struct MyTraitStruct {
+    //     _wrapper_method: Box<dyn Fn(*mut libc::c_void)>,
+
+    //     this: *mut libc::c_void,
+    //     destroy: Box<dyn Fn(*mut libc::c_void)>,
+    // }
+    // trait IntoMyTraitStruct {
+    //     fn into_my_trait_struct(self) -> MyTraitStruct;
+    // }
+    // impl MyTraitWrapper for MyTraitStruct {
+    //     fn _wrapper_method(&self) {
+    //         // arg conv
+    //         let __output = (self._wrapper_method)(self.this);
+    //         // output conv
+    //     }
+    // }
+    // #[expose_impl]
+    // impl MyTraitStruct {
+    //     #[constructor]
+    //     fn my_trait_new(method: fn(s: *mut libc::c_void), this: *mut libc::c_void, destroy: fn(s: *mut libc::c_void)) -> Self {
+    //         MyTraitStruct {
+    //             _wrapper_method: Box::new(method),
+
+    //             this,
+    //             destroy: Box::new(destroy),
+    //         }
+    //     }
+    //     #[destructor]
+    //     fn my_trait_destroy(_s: Self) {
+    //     }
+    // }
+    // impl<T: MyTraitWrapper + 'static> crate::c_trait_utils::IntoTraitStruct<MyTraitStruct> for T {
+    //     fn into_trait_struct(self) -> MyTraitStruct {
+    //         use crate::c_trait_utils::*;
+
+    //         fn _wrapper_method<I: MyTraitWrapper>(this: *mut libc::c_void) {
+    //             let this = take_ptr::<I>(this);
+    //             let result = this._wrapper_method();
+
+    //             std::mem::forget(this);
+    //             result
+    //         }
+    //         fn destroy<I>(this: *mut libc::c_void) {
+    //             let _this = take_ptr::<I>(this);
+    //         }
+
+    //         MyTraitStruct {
+    //             _wrapper_method: Box::new(_wrapper_method::<T>),
+
+    //             this: Box::into_raw(Box::new(self)) as *mut libc::c_void,
+    //             destroy: Box::new(destroy::<T>),
+    //         }
+    //     }
+    // }
+    // impl std::ops::Drop for MyTraitStruct {
+    //     fn drop(&mut self) {
+    //         // TODO: destroy can be NULL
+    //         (self.destroy)(self.this);
+    //     }
+    // }
 }
 
 /*

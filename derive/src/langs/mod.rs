@@ -7,7 +7,7 @@ use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
 use syn::{
-    parse_quote, FnArg, Ident, ItemFn, ItemImpl, ItemMod, ItemStruct, Lit, LitStr,
+    parse_quote, FnArg, Ident, ItemFn, ItemImpl, ItemMod, ItemStruct, ItemTrait, Lit, LitStr,
     ParenthesizedGenericArguments, Pat, PatIdent, PatType, Path, PathArguments, ReturnType, Token,
     Type,
 };
@@ -39,6 +39,8 @@ pub trait Lang {
     fn expose_impl(implementation: &mut ItemImpl, mod_path: &Vec<Ident>)
         -> Result<(), Self::Error>;
 
+    //     fn expose_trait(tr: &mut ItemTrait, mod_path: &Vec<Ident>) -> Result<Ident, Self::Error>;
+    //
     fn convert_input(ty: Type) -> Result<Input, Self::Error>;
 
     fn convert_output(output: Type) -> Result<Output, Self::Error>;
@@ -73,6 +75,9 @@ pub enum LangError {
     ///
     /// Only basic patterns like `foo: u32` are supported
     ComplexPatternFnArg,
+
+    /// Trying to return multiple different types by reference
+    MultipleTypesByReference,
 }
 
 impl fmt::Display for LangError {

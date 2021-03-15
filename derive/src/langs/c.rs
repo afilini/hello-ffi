@@ -1,4 +1,4 @@
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 
 use proc_macro::TokenStream;
@@ -7,8 +7,8 @@ use quote::{format_ident, quote, TokenStreamExt};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::{
-    parse_quote, BareFnArg, FnArg, Ident, ImplItem, ImplItemMethod, ItemFn, ItemStruct, Pat,
-    PatIdent, PatType, Token, TypeBareFn,
+    parse_quote, BareFnArg, FnArg, Ident, ImplItem, ImplItemMethod, ItemFn, ItemStruct, ItemTrait,
+    Pat, PatIdent, PatType, Token, TypeBareFn,
 };
 
 use super::*;
@@ -134,6 +134,15 @@ impl Lang for C {
         Ok(())
     }
 
+    // fn expose_trait(tr: &mut ItemTrait, mod_path: &Vec<Ident>) -> Result<Ident, Self::Error> {
+    //     let ident = tr.ident.clone();
+
+    //     tr.ident = format_ident!("_Trait_{}", tr.ident);
+    //     dbg!(tr);
+
+    //     Ok(ident)
+    // }
+
     fn convert_input(ty: Type) -> Result<Input, Self::Error> {
         if match_fixed_type(&ty, parse_quote!(String)) {
             Ok(Input::new_map_from(
@@ -141,6 +150,10 @@ impl Lang for C {
                 vec![parse_quote!(*const libc::c_char)],
             ))
         } else if let Some(inner) = match_generic_type(&ty, parse_quote!(Vec)) {
+            let inner = inner
+                .into_iter()
+                .collect::<Punctuated<_, Comma>>()
+                .as_tuple();
             let inner = Self::convert_input(inner)?;
             let sources = inner
                 .get_sources()
@@ -152,6 +165,10 @@ impl Lang for C {
                 vec![parse_quote!(*const #sources), parse_quote!(usize)],
             ))
         } else if let Some(inner) = match_generic_type(&ty, parse_quote!(Destroy)) {
+            let inner = inner
+                .into_iter()
+                .collect::<Punctuated<_, Comma>>()
+                .as_tuple();
             let inner = Self::convert_input(inner)?;
             let sources = inner
                 .get_sources()
@@ -202,7 +219,7 @@ impl Lang for C {
                 vec![new_bare_fn.into()],
                 move |_, ident| {
                     let ts = quote! {
-                        |#old_inputs| {
+                        move |#old_inputs| {
                             #arg_conv
 
                             let result = unsafe { #ident(#args_names) };
@@ -227,7 +244,13 @@ impl Lang for C {
             ))
         } else if output == parse_quote!(Self) {
             Ok(Output::ByReference(Box::new(parse_quote!(*mut Self))))
+        } else if output == parse_quote!(MyError) {
+            Ok(Output::new_map_to_single(output, parse_quote!(i32)))
         } else if let Some(inner) = match_generic_type(&output, parse_quote!(Vec)) {
+            let inner = inner
+                .into_iter()
+                .collect::<Punctuated<_, Comma>>()
+                .as_tuple();
             let inner = Self::convert_output(inner)?;
             let targets = inner
                 .get_targets()
@@ -241,6 +264,27 @@ impl Lang for C {
                     (parse_quote!(usize), "len".into()),
                 ],
             ))
+        } else if let Some(inner) = match_generic_type(&output, parse_quote!(Result)) {
+            let inner: [_; 2] = inner
+                .try_into()
+                .map_err(|_| CError::InvalidResult(output.span()))?;
+
+            let ok_type = Self::convert_output(inner[0].clone())?;
+            let ok_targets = ok_type.get_targets().into_iter().map(|t| *t).collect();
+            let err_type = Self::convert_output(inner[1].clone())?;
+            let err_target = err_type
+                .get_targets()
+                .into_iter()
+                .map(|t| *t)
+                .collect::<Punctuated<_, Comma>>()
+                .as_tuple(); // the error must always be a single type
+
+            Ok(Output::new_result(
+                inner[0].clone(),
+                inner[1].clone(),
+                ok_targets,
+                err_target,
+            ))
         } else {
             Ok(Output::new_unchanged(output))
         }
@@ -253,6 +297,7 @@ pub enum CError {
 
     UnnamedCallbackArguments(Span),
     DestructorReceiverArgument(Span),
+    InvalidResult(Span),
 }
 
 impl fmt::Display for CError {

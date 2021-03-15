@@ -42,7 +42,7 @@ pub fn match_fixed_type(ty: &Type, type_path: Path) -> bool {
     }
 }
 
-pub fn match_generic_type(ty: &Type, type_path: Path) -> Option<Type> {
+pub fn match_generic_type(ty: &Type, type_path: Path) -> Option<Vec<Type>> {
     if let Type::Path(TypePath { path, .. }) = ty {
         let mut path = path.clone();
         path.segments
@@ -70,7 +70,7 @@ pub fn match_generic_type(ty: &Type, type_path: Path) -> Option<Type> {
             .and_then(|content| {
                 content
                     .into_iter()
-                    .try_fold(Punctuated::<Type, Comma>::default(), |mut acc, f| match f {
+                    .try_fold(Vec::default(), |mut acc, f| match f {
                         GenericArgument::Type(ty) => {
                             acc.push(ty);
                             Some(acc)
@@ -78,7 +78,6 @@ pub fn match_generic_type(ty: &Type, type_path: Path) -> Option<Type> {
                         _ => None,
                     })
             })
-            .map(AsTuple::as_tuple)
     } else {
         None
     }
@@ -274,11 +273,14 @@ pub enum Output {
     },
     /// Move the value to the heap and return a pointer
     ByReference(Box<Type>),
-    // /// Return as "result", which has different meanings based on the language
-    // Result {
-    //     ok: Box<Type>,
-    //     err: Box<Type>,
-    // },
+    /// Return as "result", which has different meanings based on the language
+    Result {
+        original_ok: Box<Type>,
+        original_err: Box<Type>,
+
+        ok: Vec<Box<Type>>,
+        err: Box<Type>,
+    },
 }
 
 #[derive(Debug)]
@@ -303,6 +305,17 @@ impl ExpandedOutputConversion {
     pub fn by_reference(ident: &Ident) -> Self {
         let ts = quote! {
             let #ident = Box::into_raw(Box::new(#ident));
+        };
+        ts.into()
+    }
+
+    pub fn result(ident: &Ident, ok: &Type, original_ok: &Type, original_err: &Type) -> Self {
+        let ts = quote! {
+            let #ident: Result<#original_ok, #original_err> = #ident;
+            let #ident: #ok = match #ident {
+                Ok(inner) => inner.map_to(),
+                Err(e) => return e.into_platform_error(),
+            };
         };
         ts.into()
     }
@@ -342,10 +355,20 @@ impl Output {
         Self::new_map_to_suffix(original, vec![(target, String::new())])
     }
 
+    pub fn new_result(original_ok: Type, original_err: Type, ok: Vec<Type>, err: Type) -> Self {
+        Output::Result {
+            original_ok: Box::new(original_ok),
+            original_err: Box::new(original_err),
+            ok: ok.into_iter().map(Box::new).collect(),
+            err: Box::new(err),
+        }
+    }
+
     pub fn get_targets(&self) -> Vec<Box<Type>> {
         match self {
             Output::Unchanged(ty) | Output::ByReference(ty) => vec![ty.clone()],
             Output::MapTo { targets, .. } => targets.iter().map(|(t, _)| t.clone()).collect(),
+            Output::Result { ok, .. } => ok.iter().cloned().collect(),
         }
     }
 
@@ -369,6 +392,24 @@ impl Output {
                 ty: vec![parse_quote! { *mut #ty }],
                 suffix: vec![String::new()],
                 conv: ExpandedOutputConversion::by_reference(ident),
+            },
+            Output::Result {
+                ok,
+                original_ok,
+                original_err,
+                ..
+            } => ExpandedOutput {
+                ty: ok.iter().map(|t| parse_quote! { *mut #t }).collect(),
+                suffix: ok.iter().map(|_| String::new()).collect(),
+                conv: ExpandedOutputConversion::result(
+                    ident,
+                    &ok.into_iter()
+                        .map(|t| (**t).clone())
+                        .collect::<Punctuated<_, Comma>>()
+                        .as_tuple(),
+                    &original_ok,
+                    &original_err,
+                ),
             },
         }
     }
@@ -413,23 +454,63 @@ impl Return {
         let converted = convert_output(ty)?;
 
         let ExpandedOutput { ty, conv, .. } = converted.expand(&ident);
-        let ty = ty.into_iter().map(|t| *t).as_tuple();
 
         match converted {
             Output::ByReference(_) => {
-                let extra_arg = parse_quote!(#arg_name: #ty);
+                if ty.len() > 1 {
+                    return Err(LangError::MultipleTypesByReference.into());
+                }
+                let ty = &ty[0];
 
                 Ok(ExpandedReturn {
                     ret: ReturnType::Default,
-                    extra_args: vec![extra_arg],
+                    extra_args: vec![parse_quote!(#arg_name: #ty)],
                     conv: ExpandedReturnConversion::from(quote! {
                         #conv
                         unsafe { *#arg_name = #ident; }
                     }),
                 })
             }
+            Output::Result {
+                err, original_err, ..
+            } => {
+                let (extra_args, assign_args): (Vec<_>, Vec<_>) = ty
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| {
+                        let arg_name_num = format_ident!("{}_{}", arg_name, i);
+                        let index = syn::Index::from(i);
+
+                        (
+                            parse_quote!(#arg_name_num: #t),
+                            quote! { unsafe { *#arg_name_num = #ident.#index; } },
+                        )
+                    })
+                    .unzip();
+
+                Ok(ExpandedReturn {
+                    ret: ReturnType::Type(Default::default(), err),
+                    extra_args,
+                    conv: ExpandedReturnConversion::from(quote! {
+                        use crate::IntoPlatformError;
+
+                        #conv
+                        #(#assign_args)*
+
+                        #original_err::ok()
+                    }),
+                })
+            }
             _ => Ok(ExpandedReturn {
-                ret: ReturnType::Type(Default::default(), Box::new(ty)),
+                ret: ReturnType::Type(
+                    Default::default(),
+                    Box::new(
+                        ty.into_iter()
+                            .map(|t| *t)
+                            .collect::<Punctuated<_, Comma>>()
+                            .as_tuple(),
+                    ),
+                ),
                 extra_args: vec![],
                 conv: ExpandedReturnConversion::ret(ident, conv),
             }),

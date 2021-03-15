@@ -7,7 +7,7 @@ use syn::parse::Parser;
 use syn::punctuated::Punctuated;
 use syn::{
     parse_macro_input, parse_quote, Attribute, Fields, Ident, ImplItem, ImplItemMethod, Item,
-    ItemFn, ItemImpl, ItemMod, ItemStruct, Token, Type, TypePath,
+    ItemFn, ItemImpl, ItemMod, ItemStruct, ItemTrait, Token, Type, TypePath,
 };
 
 mod langs;
@@ -85,6 +85,19 @@ fn analyze_module(module: &mut ItemMod, mut path: Vec<Ident>) {
                     CurrentLang::expose_impl(implementation, &path).unwrap();
                 }
             }
+            Item::Trait(tr) => {
+                if let Some(pos) = tr
+                    .attrs
+                    .iter()
+                    .position(|a| a.path.is_ident("expose_trait"))
+                {
+                    tr.attrs.remove(pos);
+
+                    // sub_items.push(ModuleItem::Trait(
+                    //     CurrentLang::expose_trait(tr, &path).unwrap(),
+                    // ));
+                }
+            }
             _ => {}
         }
     }
@@ -137,6 +150,17 @@ pub fn expose_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 pub fn expose_impl(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut input = parse_macro_input!(item as ItemImpl);
     CurrentLang::expose_impl(&mut input, &vec![]).unwrap();
+
+    (quote! {
+        #input
+    })
+    .into()
+}
+
+#[proc_macro_attribute]
+pub fn expose_trait(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let mut input = parse_macro_input!(item as ItemTrait);
+    // CurrentLang::expose_trait(&mut input, &vec![]).unwrap();
 
     (quote! {
         #input

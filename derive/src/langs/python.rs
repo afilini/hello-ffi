@@ -90,6 +90,7 @@ impl Lang for Python {
                         m.add_submodule(submod)?;
                     }
                 }
+                ModuleItem::Trait(ident) => TokenStream2::default(),
             };
 
             export_tokens.extend(tokens);

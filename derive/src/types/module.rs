@@ -5,4 +5,5 @@ pub enum ModuleItem {
     Function(Ident),
     Structure(Ident),
     Module(Ident),
+    Trait(Ident),
 }
