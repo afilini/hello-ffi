@@ -1,74 +1,29 @@
+#include <assert.h>
 #include <stdio.h>
 
 #include "bindings.h"
 
-// static uint32_t custom_do_something(__attribute__ ((unused)) const void* this_, uint32_t val) {
-//     return val + 4242;
-// }
-
-const char* from_c = "Hello From C!";
-
-const char *cb(char* s, char* arr[], size_t arr_len, unsigned int val) {
-    printf("Printing from C: `%s`, val: `%u`\n", s, val);
-    for (size_t i = 0; i < arr_len; i++) {
-        printf(" > %s\n", arr[i]);
-    }
-
-    free(s);
-    free(arr);
-
-    return from_c;
-}
-
 int main() {
-    // char *res = hello_static("World!");
-    // printf("Result: '%s'\n", res);
-    // free(res);
+    Script *s = NULL;
+    int ret = script_from_hex("a91457d6b4ded38193013643b03b4472e15f80bc465787", &s);
+    assert(ret == 0);
 
-    // struct HelloStruct *s;
-    // hello_struct_new("C init str", &s);
-    // res = hello_method(s, "StructWorld!");
-    // printf("Result: '%s'\n", res);
-    // free(res);
-    // hello_struct_destroy(s);
+    Network *n = NULL;
+    network_testnet(&n);
 
-    const char* list[] = {"AAAAAAAAAAAAAA", "BBBBBBBBBBBBBBBBBBBBB"};
-    uint32_t *ptr = NULL;
-    size_t s = 0;
-    int ret = test_pure_fn(list, 2, &ptr, &s);
+    Address *a = NULL;
+    address_from_script(s, n, &a);
+    assert(a != NULL);
 
-    printf("Ret: %d\n", ret);
-    for (size_t i = 0; i < s; i++) {
-        printf(" > %u\n", ptr[i]);
-    }
+    char *address_str = address_to_string(a);
+    printf("Address: %s\n", address_str);
+    free(address_str);
 
-    // char *ret2 = test_callback(cb);
-    // printf("Ret: %s\n", ret2);
-    // free(ret2);
+    char *script_hex = script_to_hex(s);
+    printf("Script: %s\n", script_hex);
+    free(script_hex);
 
-    // struct Wallet *wallet;
-    // wallet_new("Wallet Name", &wallet);
-
-    // struct TxBuilder *tx_builder;
-    // create_tx(wallet, &tx_builder);
-
-    // disable_flag(tx_builder);
-
-    // struct CoinSelection triple_cs = triple_cs_new(1000);
-    // coin_selection(tx_builder, triple_cs);
-
-    // struct CoinSelection custom_cs = {
-    //     .this_ = NULL,
-    //     .fn_do_something = &custom_do_something,
-    //     .destroy = NULL,
-    // };
-    // coin_selection(tx_builder, custom_cs);
-
-    // char *wallet_name = get_wallet_name(tx_builder);
-    // printf("Wallet name is: '%s'\n", wallet_name);
-    // free(wallet_name);
-
-    // printf("The result is: %d\n", finish(tx_builder));
-
-    // wallet_destroy(wallet);
+    script_destroy(s);
+    network_destroy(n);
+    address_destroy(a);
 }

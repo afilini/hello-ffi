@@ -10,7 +10,7 @@ fn c_build_rs() {
     Builder::new()
         .with_crate(crate_dir)
         .with_language(Language::C)
-        .with_parse_expand(&["hello-ffi"])
+        .with_parse_expand(&["bdk-ffi"])
         .with_parse_expand_features(&["c"])
         .generate()
         .expect("Unable to generate bindings")

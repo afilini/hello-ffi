@@ -1,6 +1,6 @@
 [package]
-name = "hello-ffi"
-version = "0.1.0"
+name = "bdk-ffi"
+version = "0.4.0"
 authors = ["Alekos Filini <alekos.filini@gmail.com>"]
 edition = "2018"
 
@@ -8,7 +8,7 @@ edition = "2018"
 crate-type = ["dylib"]
 
 [dependencies]
-hello = { path = "./hello" }
+bdk = "0.4"
 derive = { path = "./derive", features = ["debug"] }
 libc = { version = "0.2", optional = true}
 pyo3 = { version = "0.13", features = ["extension-module"], optional = true }
@@ -21,4 +21,4 @@ c = ["libc", "cbindgen", "derive/c"]
 python = ["pyo3", "derive/python"]
 
 # [workspace]
-# members = ["derive", "hello"]
+# members = ["derive"]

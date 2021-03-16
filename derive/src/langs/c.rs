@@ -8,7 +8,7 @@ use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::{
     parse_quote, BareFnArg, FnArg, Ident, ImplItem, ImplItemMethod, ItemFn, ItemStruct, ItemTrait,
-    Pat, PatIdent, PatType, Token, TypeBareFn,
+    Pat, PatIdent, PatType, Token, TypeBareFn, TypePath,
 };
 
 use super::*;
@@ -62,12 +62,13 @@ impl Lang for C {
             #[no_mangle]
             #[allow(non_snake_case)]
             pub extern "C" fn #ident(#args) #ret {
-                use crate::{MapFrom, MapTo};
-                use crate::c_destroy::Destroy;
+                use crate::mapping::{MapFrom, MapTo};
+                use crate::langs::*;
 
                 #input_conversion
 
-                let __output = { #block };
+                let block_closure = move || { #block };
+                let __output = block_closure();
                 #output_conversion
             }
         };
@@ -120,6 +121,18 @@ impl Lang for C {
                         attrs: attrs.clone(),
                         block: Box::new(block.clone()),
                     };
+                    if let Type::Path(TypePath { path, .. }) = implementation.self_ty.as_ref() {
+                        // Add the struct name as prefix
+                        as_fn.sig.ident = format_ident!(
+                            "{}_{}",
+                            path.segments
+                                .iter()
+                                .map(|s| s.ident.to_string().to_lowercase())
+                                .collect::<Vec<_>>()
+                                .join("_"),
+                            as_fn.sig.ident
+                        );
+                    }
                     Self::expose_fn(&mut as_fn, mod_path)?;
 
                     *sig = as_fn.sig;
@@ -237,15 +250,19 @@ impl Lang for C {
     }
 
     fn convert_output(output: Type) -> Result<Output, Self::Error> {
-        if output == parse_quote!(String) {
+        if output == parse_quote!(Self) {
+            Ok(Output::ByReference(Box::new(parse_quote!(*mut Self))))
+        } else if output == parse_quote!(String) {
             Ok(Output::new_map_to_single(
                 output,
                 parse_quote!(*mut libc::c_char),
             ))
-        } else if output == parse_quote!(Self) {
-            Ok(Output::ByReference(Box::new(parse_quote!(*mut Self))))
-        } else if output == parse_quote!(MyError) {
+        } else if output == parse_quote!(BitcoinError) {
             Ok(Output::new_map_to_single(output, parse_quote!(i32)))
+        } else if output == parse_quote!(Script) {
+            Ok(Output::ByReference(Box::new(parse_quote!(*mut Script))))
+        } else if output == parse_quote!(Network) {
+            Ok(Output::ByReference(Box::new(parse_quote!(*mut Network))))
         } else if let Some(inner) = match_generic_type(&output, parse_quote!(Vec)) {
             let inner = inner
                 .into_iter()
@@ -264,6 +281,19 @@ impl Lang for C {
                     (parse_quote!(usize), "len".into()),
                 ],
             ))
+        } else if let Some(inner) = match_generic_type(&output, parse_quote!(Option)) {
+            let inner = inner
+                .into_iter()
+                .collect::<Punctuated<_, Comma>>()
+                .as_tuple();
+            let inner_output = Self::convert_output(inner.clone())?;
+            let targets = inner_output
+                .get_targets()
+                .into_iter()
+                .map(|t| *t)
+                .as_tuple();
+
+            Ok(Output::new_option(inner, targets))
         } else if let Some(inner) = match_generic_type(&output, parse_quote!(Result)) {
             let inner: [_; 2] = inner
                 .try_into()

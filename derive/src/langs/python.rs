@@ -45,7 +45,7 @@ impl Lang for Python {
         *function = parse_quote! {
             #[pyo3::prelude::pyfunction]
             fn #ident(#args) #ret {
-                use crate::{MapTo, MapFrom};
+                use crate::mapping::{MapTo, MapFrom};
 
                 #input_conversion
 

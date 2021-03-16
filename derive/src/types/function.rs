@@ -281,6 +281,8 @@ pub enum Output {
         ok: Vec<Box<Type>>,
         err: Box<Type>,
     },
+    /// Return by reference, NULL if the Option is `None`
+    Option { original: Box<Type>, ty: Box<Type> },
 }
 
 #[derive(Debug)]
@@ -305,6 +307,17 @@ impl ExpandedOutputConversion {
     pub fn by_reference(ident: &Ident) -> Self {
         let ts = quote! {
             let #ident = Box::into_raw(Box::new(#ident));
+        };
+        ts.into()
+    }
+
+    pub fn option(ident: &Ident, ty: &Type, original: &Type) -> Self {
+        let ts = quote! {
+            let #ident: Option<#original> = #ident;
+            let #ident: #ty = match #ident {
+                Some(inner) => Box::into_raw(Box::new(inner)),
+                None => std::ptr::null_mut(),
+            };
         };
         ts.into()
     }
@@ -364,9 +377,18 @@ impl Output {
         }
     }
 
+    pub fn new_option(original: Type, ty: Type) -> Self {
+        Output::Option {
+            original: Box::new(original),
+            ty: Box::new(ty),
+        }
+    }
+
     pub fn get_targets(&self) -> Vec<Box<Type>> {
         match self {
-            Output::Unchanged(ty) | Output::ByReference(ty) => vec![ty.clone()],
+            Output::Unchanged(ty) | Output::ByReference(ty) | Output::Option { ty, .. } => {
+                vec![ty.clone()]
+            }
             Output::MapTo { targets, .. } => targets.iter().map(|(t, _)| t.clone()).collect(),
             Output::Result { ok, .. } => ok.iter().cloned().collect(),
         }
@@ -410,6 +432,11 @@ impl Output {
                     &original_ok,
                     &original_err,
                 ),
+            },
+            Output::Option { original, ty } => ExpandedOutput {
+                ty: vec![parse_quote! { *mut #ty }],
+                suffix: vec!["opt".to_string()],
+                conv: ExpandedOutputConversion::option(ident, &ty, &original),
             },
         }
     }
@@ -456,7 +483,7 @@ impl Return {
         let ExpandedOutput { ty, conv, .. } = converted.expand(&ident);
 
         match converted {
-            Output::ByReference(_) => {
+            Output::ByReference(_) | Output::Option { .. } => {
                 if ty.len() > 1 {
                     return Err(LangError::MultipleTypesByReference.into());
                 }
@@ -474,26 +501,30 @@ impl Return {
             Output::Result {
                 err, original_err, ..
             } => {
-                let (extra_args, assign_args): (Vec<_>, Vec<_>) = ty
-                    .iter()
-                    .enumerate()
-                    .map(|(i, t)| {
-                        let arg_name_num = format_ident!("{}_{}", arg_name, i);
-                        let index = syn::Index::from(i);
+                let (extra_args, assign_args): (Vec<_>, Vec<_>) = match ty.as_slice() {
+                    [ty] => (
+                        vec![parse_quote!(#arg_name: #ty)],
+                        vec![quote! { unsafe { *#arg_name = #ident; } }],
+                    ),
+                    ty => ty
+                        .iter()
+                        .enumerate()
+                        .map(|(i, t)| {
+                            let arg_name_num = format_ident!("{}_{}", arg_name, i);
+                            let index = syn::Index::from(i);
 
-                        (
-                            parse_quote!(#arg_name_num: #t),
-                            quote! { unsafe { *#arg_name_num = #ident.#index; } },
-                        )
-                    })
-                    .unzip();
+                            (
+                                parse_quote!(#arg_name_num: #t),
+                                quote! { unsafe { *#arg_name_num = #ident.#index; } },
+                            )
+                        })
+                        .unzip(),
+                };
 
                 Ok(ExpandedReturn {
                     ret: ReturnType::Type(Default::default(), err),
                     extra_args,
                     conv: ExpandedReturnConversion::from(quote! {
-                        use crate::IntoPlatformError;
-
                         #conv
                         #(#assign_args)*
 
