@@ -7,7 +7,7 @@ use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
 use syn::{
-    parse_quote, FnArg, Ident, ItemFn, ItemImpl, ItemMod, ItemStruct, ItemTrait, Lit, LitStr,
+    parse_quote, FnArg, Ident, Item, ItemFn, ItemImpl, ItemMod, ItemStruct, ItemTrait, Lit, LitStr,
     ParenthesizedGenericArguments, Pat, PatIdent, PatType, Path, PathArguments, ReturnType, Token,
     Type,
 };
@@ -39,8 +39,12 @@ pub trait Lang {
     fn expose_impl(implementation: &mut ItemImpl, mod_path: &Vec<Ident>)
         -> Result<(), Self::Error>;
 
-    //     fn expose_trait(tr: &mut ItemTrait, mod_path: &Vec<Ident>) -> Result<Ident, Self::Error>;
-    //
+    fn expose_trait(
+        tr: &mut ItemTrait,
+        mod_path: &Vec<Ident>,
+        extra: &mut Vec<Item>,
+    ) -> Result<Ident, Self::Error>;
+
     fn convert_input(ty: Type) -> Result<Input, Self::Error>;
 
     fn convert_output(output: Type) -> Result<Output, Self::Error>;
@@ -66,6 +70,29 @@ pub trait Lang {
                     (fold_args, fold_conv)
                 },
             ))
+    }
+}
+
+pub trait ToSnakeCase {
+    fn to_snake_case(&self) -> String;
+}
+
+impl<T: AsRef<str> + ?Sized> ToSnakeCase for T {
+    fn to_snake_case(&self) -> String {
+        let mut s = String::with_capacity(self.as_ref().len());
+
+        for (i, c) in self.as_ref().char_indices() {
+            if c.is_uppercase() {
+                if i > 0 {
+                    s.push('_');
+                }
+                s.extend(c.to_lowercase());
+            } else {
+                s.push(c);
+            }
+        }
+
+        s
     }
 }
 

@@ -3,27 +3,21 @@
 
 #include "bindings.h"
 
+static void trait_destroy(__attribute__((unused)) void *self) {}
+
+static void trait_method(__attribute__((unused)) void *self, char *s) {
+    printf("Printing from C: `%s`\n", s);
+    free(s);
+}
+
 int main() {
-    Script *s = NULL;
-    int ret = script_from_hex("a91457d6b4ded38193013643b03b4472e15f80bc465787", &s);
-    assert(ret == 0);
+    MyTraitStruct *ts = NULL;
+    my_trait_struct_new(NULL, trait_destroy, trait_method, &ts);
+    use_trait(ts);
+    my_trait_struct_destroy(ts);
 
-    Network *n = NULL;
-    network_testnet(&n);
-
-    Address *a = NULL;
-    address_from_script(s, n, &a);
-    assert(a != NULL);
-
-    char *address_str = address_to_string(a);
-    printf("Address: %s\n", address_str);
-    free(address_str);
-
-    char *script_hex = script_to_hex(s);
-    printf("Script: %s\n", script_hex);
-    free(script_hex);
-
-    script_destroy(s);
-    network_destroy(n);
-    address_destroy(a);
+    MyTraitStruct *ts_from_lib = NULL;
+    impl_my_trait_new(42, &ts_from_lib);
+    use_trait(ts_from_lib);
+    my_trait_struct_destroy(ts_from_lib);
 }

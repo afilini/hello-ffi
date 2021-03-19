@@ -34,10 +34,13 @@ impl IntoPlatformError for PlatformOption {
     fn ok() {}
 }
 
-// #[inline]
-// pub fn take_ptr<I>(this: *mut libc::c_void) -> Box<I> {
-//     unsafe { Box::from_raw(this as *mut I) }
-// }
-// pub trait IntoTraitStruct<T> {
-//     fn into_trait_struct(self) -> T;
-// }
+pub trait IntoTraitStruct: Sized {
+    type Target;
+
+    fn into_trait_struct(self) -> Self::Target;
+}
+
+#[inline]
+pub fn take_ptr<I>(this: *mut libc::c_void) -> Box<I> {
+    unsafe { Box::from_raw(this as *mut I) }
+}

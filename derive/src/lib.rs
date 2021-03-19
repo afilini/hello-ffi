@@ -27,7 +27,7 @@ fn check_struct(s: &ItemStruct) {
     }
 }
 
-fn analyze_module(module: &mut ItemMod, mut path: Vec<Ident>) {
+fn analyze_module(module: &mut ItemMod, mut path: Vec<Ident>, extra: &mut Vec<Item>) {
     path.push(module.ident.clone());
 
     let mut sub_items = vec![];
@@ -41,7 +41,7 @@ fn analyze_module(module: &mut ItemMod, mut path: Vec<Ident>) {
                     .position(|a| a.path.is_ident("expose_mod"))
                 {
                     inner_module.attrs.remove(pos);
-                    analyze_module(inner_module, path.clone());
+                    analyze_module(inner_module, path.clone(), extra);
 
                     sub_items.push(ModuleItem::Module(inner_module.ident.clone()));
                 }
@@ -93,9 +93,9 @@ fn analyze_module(module: &mut ItemMod, mut path: Vec<Ident>) {
                 {
                     tr.attrs.remove(pos);
 
-                    // sub_items.push(ModuleItem::Trait(
-                    //     CurrentLang::expose_trait(tr, &path).unwrap(),
-                    // ));
+                    sub_items.push(ModuleItem::Trait(
+                        CurrentLang::expose_trait(tr, &path, extra).unwrap(),
+                    ));
                 }
             }
             _ => {}
@@ -108,7 +108,13 @@ fn analyze_module(module: &mut ItemMod, mut path: Vec<Ident>) {
 #[proc_macro_attribute]
 pub fn expose_mod(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut input = parse_macro_input!(item as ItemMod);
-    analyze_module(&mut input, vec![]);
+    let mut extra = vec![];
+    analyze_module(&mut input, vec![], &mut extra);
+
+    match &mut input.content {
+        Some((_, items)) => items.extend(extra),
+        cont => *cont = Some((Default::default(), extra)),
+    }
 
     (quote! {
         #input

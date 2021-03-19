@@ -3,12 +3,13 @@ use std::fmt;
 
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
-use quote::{format_ident, quote, TokenStreamExt};
+use quote::{format_ident, quote, ToTokens, TokenStreamExt};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::{
-    parse_quote, BareFnArg, FnArg, Ident, ImplItem, ImplItemMethod, ItemFn, ItemStruct, ItemTrait,
-    Pat, PatIdent, PatType, Token, TypeBareFn, TypePath,
+    parse_quote, BareFnArg, Field, FnArg, Ident, ImplItem, ImplItemMethod, Item, ItemFn,
+    ItemStruct, ItemTrait, Pat, PatIdent, PatType, Token, TraitItem, TraitItemMethod, TypeBareFn,
+    TypePath,
 };
 
 use super::*;
@@ -127,7 +128,7 @@ impl Lang for C {
                             "{}_{}",
                             path.segments
                                 .iter()
-                                .map(|s| s.ident.to_string().to_lowercase())
+                                .map(|s| s.ident.to_string().to_snake_case())
                                 .collect::<Vec<_>>()
                                 .join("_"),
                             as_fn.sig.ident
@@ -147,14 +148,218 @@ impl Lang for C {
         Ok(())
     }
 
-    // fn expose_trait(tr: &mut ItemTrait, mod_path: &Vec<Ident>) -> Result<Ident, Self::Error> {
-    //     let ident = tr.ident.clone();
+    fn expose_trait(
+        tr: &mut ItemTrait,
+        mod_path: &Vec<Ident>,
+        extra: &mut Vec<Item>,
+    ) -> Result<Ident, Self::Error> {
+        let ident = tr.ident.clone();
+        dbg!(&tr);
 
-    //     tr.ident = format_ident!("_Trait_{}", tr.ident);
-    //     dbg!(tr);
+        let mut callbacks = vec![];
+        for item in &mut tr.items {
+            if let TraitItem::Method(TraitItemMethod { attrs, sig, .. }) = item {
+                let ident = &sig.ident;
 
-    //     Ok(ident)
-    // }
+                let expose_trait_opts = match attrs.iter().position(
+                    |attr| matches!(attr.path.get_ident(), Some(s) if s == "expose_trait"),
+                ) {
+                    Some(pos) => {
+                        let attr = attrs.remove(pos);
+                        attr.parse_args_with(
+                            Punctuated::<ExposeTraitOption, Comma>::parse_separated_nonempty,
+                        )
+                        .map_err(CError::ExposeTraitAttrError)?
+                    }
+                    None => Default::default(),
+                };
+                let original_ident = expose_trait_opts
+                    .iter()
+                    .find_map(|opt| match opt {
+                        ExposeTraitOption::Original(_, i) => Some(Ident::new(&i.value(), i.span())),
+                        _ => None,
+                    })
+                    .unwrap_or(ident.clone());
+
+                let mut inputs = sig.inputs.iter().cloned().collect::<Vec<_>>();
+                inputs[0] = parse_quote!(this: *mut libc::c_void);
+
+                let output = &sig.output;
+                let ty: Type = parse_quote!(fn(#(#inputs),*) #output);
+                let converted = Self::convert_input(ty)?.expand(ident);
+
+                if let Type::BareFn(bare_fn) = converted.types[0].as_ref() {
+                    callbacks.push((sig, bare_fn.clone(), converted.conv, original_ident));
+                }
+            }
+        }
+
+        // dbg!(&callbacks);
+
+        // Define a structure containing all the callback for the methods
+        let struct_methods = callbacks.iter().map(|(sig, bare_fn, _, _)| {
+            let ident = &sig.ident;
+            let output = &bare_fn.output;
+            let input_types = sig.inputs.iter().map(|arg| match arg {
+                FnArg::Receiver(_) => Box::new(parse_quote!(*mut libc::c_void)),
+                FnArg::Typed(PatType { ty, .. }) => ty.clone(),
+            });
+
+            quote!(#ident: Box<dyn Fn(#(#input_types),*) #output>)
+        });
+        let trait_struct_ident = format_ident!("{}Struct", ident);
+        let trait_struct: ItemStruct = parse_quote! {
+            pub struct #trait_struct_ident {
+                this: *mut libc::c_void,
+                destroy: Box<dyn Fn(*mut libc::c_void)>,
+
+                #(#struct_methods),*
+            }
+        };
+        extra.push(trait_struct.into());
+
+        // Define a constructor for our struct
+        let constructor_ident =
+            format_ident!("{}_new", trait_struct_ident.to_string().to_snake_case());
+        let destructor_ident =
+            format_ident!("{}_destroy", trait_struct_ident.to_string().to_snake_case());
+        let (mut constructor_args, fields): (Vec<_>, Vec<_>) = callbacks
+            .iter()
+            .map(|(sig, bare_fn, conv, _)| {
+                let ident = &sig.ident;
+
+                (
+                    quote!(#ident: #bare_fn),
+                    quote! {
+                        #ident: Box::new(#conv)
+                    },
+                )
+            })
+            .unzip();
+        constructor_args.push(quote!(ptr_out: *mut *mut Self));
+        let constructor: ItemImpl = parse_quote! {
+            impl #trait_struct_ident {
+                #[no_mangle]
+                pub extern "C" fn #constructor_ident(this: *mut libc::c_void, destroy: unsafe extern "C" fn(*mut libc::c_void), #(#constructor_args),*) {
+                    use crate::mapping::{MapFrom, MapTo};
+                    use crate::langs::*;
+
+                    let s = #trait_struct_ident {
+                        this,
+                        destroy: Box::new(move |this: *mut libc::c_void| {
+                            if this != std::ptr::null_mut() {
+                                unsafe { destroy(this) }
+                            }
+                        }),
+                        #(#fields),*
+                    };
+
+                    unsafe {
+                        *ptr_out = Box::into_raw(Box::new(s));
+                    }
+                }
+
+                #[no_mangle]
+                pub unsafe extern "C" fn #destructor_ident(s: *mut Self) {
+                    Box::from_raw(s);
+                }
+            }
+        };
+        extra.push(constructor.into());
+
+        // Impl the trait on the trait structure
+        let impl_methods = callbacks.iter().map(|(sig, _, _, _)| {
+            let method_ident = &sig.ident;
+            let call_args = sig.inputs.iter().map(|arg| match arg {
+                FnArg::Receiver(_) => quote!(self.this),
+                FnArg::Typed(PatType { pat, .. }) => pat.to_token_stream(),
+            });
+
+            quote! {
+                #sig {
+                    (self.#method_ident)(#(#call_args),*)
+                }
+            }
+        });
+        let impl_on_trait_struct: ItemImpl = parse_quote! {
+            impl #ident for #trait_struct_ident {
+                #(#impl_methods)*
+            }
+        };
+        extra.push(impl_on_trait_struct.into());
+
+        // Define a custom destructor that calls `destroy`
+        let destructor: ItemImpl = parse_quote! {
+            impl std::ops::Drop for #trait_struct_ident {
+                fn drop(&mut self) {
+                    (self.destroy)(self.this)
+                }
+            }
+        };
+        extra.push(destructor.into());
+
+        // Impl `IntoTraitStruct<Target = TraitStruct>` for the supertrait
+        let supertrait = &tr.supertraits[0];
+        let (wrap_fns, struct_members): (Vec<_>, Vec<_>) = callbacks
+            .iter()
+            .map(|(sig, bare_fn, _, original_ident)| {
+                let ident = &sig.ident;
+                let output = &bare_fn.output;
+                let inputs = sig.inputs.iter().map(|arg| match arg {
+                    FnArg::Receiver(_) => parse_quote!(this: *mut libc::c_void),
+                    ty @ FnArg::Typed(_) => ty.clone(),
+                });
+                let arg_names = sig.inputs.iter().filter_map(|arg| match arg {
+                    FnArg::Receiver(_) => None,
+                    FnArg::Typed(PatType { pat, .. }) => Some(pat.clone()),
+                });
+
+                (
+                    quote! {
+                        fn #ident<T: #supertrait>(#(#inputs),*) {
+                            let this = take_ptr::<T>(this);
+
+                            let result = {
+                                this.#original_ident(#(#arg_names),*);
+                            };
+
+                            std::mem::forget(this);
+                            return result;
+                        }
+                    },
+                    quote! { #ident: Box::new(#ident::<Self>) },
+                )
+            })
+            .unzip();
+
+        let into_trait_struct: ItemImpl = parse_quote! {
+            impl<T: 'static + #supertrait + Sized> crate::langs::IntoTraitStruct for T {
+                type Target = #trait_struct_ident;
+
+                fn into_trait_struct(self) -> Self::Target {
+                    use crate::langs::take_ptr;
+
+                    let this = Box::into_raw(Box::new(self)) as *mut libc::c_void;
+
+                    fn destroy<T>(this: *mut libc::c_void) {
+                        let _this = take_ptr::<T>(this);
+                    }
+
+                    #(#wrap_fns)*
+
+                    #trait_struct_ident {
+                        this,
+                        destroy: Box::new(destroy::<Self>),
+
+                        #(#struct_members),*
+                    }
+                }
+            }
+        };
+        extra.push(into_trait_struct.into());
+
+        Ok(ident)
+    }
 
     fn convert_input(ty: Type) -> Result<Input, Self::Error> {
         if match_fixed_type(&ty, parse_quote!(String)) {
@@ -263,6 +468,10 @@ impl Lang for C {
             Ok(Output::ByReference(Box::new(parse_quote!(*mut Script))))
         } else if output == parse_quote!(Network) {
             Ok(Output::ByReference(Box::new(parse_quote!(*mut Network))))
+        } else if output == parse_quote!(MyTraitStruct) {
+            Ok(Output::ByReference(Box::new(parse_quote!(
+                *mut MyTraitStruct
+            ))))
         } else if let Some(inner) = match_generic_type(&output, parse_quote!(Vec)) {
             let inner = inner
                 .into_iter()
@@ -328,6 +537,8 @@ pub enum CError {
     UnnamedCallbackArguments(Span),
     DestructorReceiverArgument(Span),
     InvalidResult(Span),
+
+    ExposeTraitAttrError(syn::Error),
 }
 
 impl fmt::Display for CError {

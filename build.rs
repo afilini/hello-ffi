@@ -1,5 +1,8 @@
 #[cfg(feature = "c")]
 fn c_build_rs() {
+    println!("cargo:rerun-if-changed=derive/");
+    println!("cargo:rerun-if-changed=src/");
+
     use std::env;
 
     use cbindgen::{Builder, Language};
@@ -18,6 +21,8 @@ fn c_build_rs() {
 }
 
 fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
+
     #[cfg(feature = "c")]
     c_build_rs();
 }

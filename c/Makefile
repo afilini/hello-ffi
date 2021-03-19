@@ -2,7 +2,7 @@ CC           := gcc
 CFLAGS       := -Og -Wall -Wextra
 LIB_PATH     := `pwd`/../target/debug
 
-RUST_SRCS    := $(shell find ../src ../derive -type f -name "*.rs")
+RUST_SRCS    := $(shell find ../ ../src ../derive -type f -name "*.rs")
 CARGO_TOML   := $(shell find ../ ../derive -type f -name "Cargo.toml")
 
 all: example
