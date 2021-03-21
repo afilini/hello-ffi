@@ -41,3 +41,9 @@ macro_rules! impl_py_error {
         }
     };
 }
+
+pub trait IntoTraitStruct: Sized {
+    type Target;
+
+    fn into_trait_struct(self) -> Self::Target;
+}

@@ -15,15 +15,17 @@ compile_error!("Enable at most one language");
 // pub mod bitcoin_mod;
 
 pub trait MyTrait {
-    fn method(&self, s: String);
+    fn method(&self, s: String) -> String;
 }
 pub struct ImplMyTrait(pub u32);
 impl MyTrait for ImplMyTrait {
-    fn method(&self, s: String) {
+    fn method(&self, s: String) -> String {
         println!(
             "Called `method()` on `ImplMyTrait({})` with s = `{}`",
             self.0, s
         );
+
+        format!("ModifiedFromRust({})", s)
     }
 }
 
@@ -46,10 +48,10 @@ mod test_mod {
     #[expose_trait]
     pub trait MyTrait: super::MyTrait {
         #[expose_trait(original = "method")]
-        fn _wrapper_method(&self, s: String);
+        fn _wrapper_method(&self, s: String) -> String;
     }
     impl super::MyTrait for MyTraitStruct {
-        fn method(&self, s: String) {
+        fn method(&self, s: String) -> String {
             self._wrapper_method(s)
         }
     }
@@ -58,6 +60,7 @@ mod test_mod {
     fn use_trait(t: &MyTraitStruct) {
         use super::MyTrait;
 
-        t.method("Hello from Rust".to_string());
+        let ret = t.method("Hello from Rust".to_string());
+        println!("Returned: {}", ret);
     }
 }

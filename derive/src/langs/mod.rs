@@ -105,6 +105,9 @@ pub enum LangError {
 
     /// Trying to return multiple different types by reference
     MultipleTypesByReference,
+
+    /// Invalid attributes given to `#[expose_trait]`
+    ExposeTraitAttrError(syn::Error),
 }
 
 impl fmt::Display for LangError {

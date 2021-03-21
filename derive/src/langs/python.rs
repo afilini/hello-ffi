@@ -7,7 +7,7 @@ use quote::{format_ident, quote, ToTokens, TokenStreamExt};
 use syn::punctuated::Punctuated;
 use syn::{
     parse_quote, Attribute, FnArg, Ident, ImplItem, ImplItemMethod, Item, ItemFn, Pat, PatIdent,
-    PatType, Token,
+    PatType, Token, TraitItem, TraitItemMethod,
 };
 
 use super::*;
@@ -46,6 +46,7 @@ impl Lang for Python {
             #[pyo3::prelude::pyfunction]
             fn #ident(#args) #ret {
                 use crate::mapping::{MapTo, MapFrom};
+                use crate::langs::*;
 
                 #input_conversion
 
@@ -90,7 +91,11 @@ impl Lang for Python {
                         m.add_submodule(submod)?;
                     }
                 }
-                ModuleItem::Trait(ident) => TokenStream2::default(),
+                ModuleItem::Trait(ident) => {
+                    quote! {
+                        m.add_class::<#ident>()?;
+                    }
+                }
             };
 
             export_tokens.extend(tokens);
@@ -121,9 +126,17 @@ impl Lang for Python {
         opts: Punctuated<ExposeStructOpts, Token![,]>,
         mod_path: &Vec<Ident>,
     ) -> Result<Ident, Self::Error> {
-        structure
-            .attrs
-            .push(parse_quote!( #[pyo3::prelude::pyclass] ));
+        let attr = if opts
+            .iter()
+            .find(|o| **o == ExposeStructOpts::Subclass)
+            .is_some()
+        {
+            parse_quote!( #[pyo3::prelude::pyclass(subclass)] )
+        } else {
+            parse_quote!( #[pyo3::prelude::pyclass] )
+        };
+
+        structure.attrs.push(attr);
 
         Ok(structure.ident.clone())
     }
@@ -165,6 +178,149 @@ impl Lang for Python {
         }
 
         Ok(())
+    }
+
+    fn expose_trait(
+        tr: &mut ItemTrait,
+        mod_path: &Vec<Ident>,
+        extra: &mut Vec<Item>,
+    ) -> Result<Ident, Self::Error> {
+        let ident = tr.ident.clone();
+
+        let mut methods = vec![];
+        for item in &mut tr.items {
+            if let TraitItem::Method(TraitItemMethod { attrs, sig, .. }) = item {
+                let ident = &sig.ident;
+
+                let expose_trait_opts = match attrs.iter().position(
+                    |attr| matches!(attr.path.get_ident(), Some(s) if s == "expose_trait"),
+                ) {
+                    Some(pos) => {
+                        let attr = attrs.remove(pos);
+                        attr.parse_args_with(
+                            Punctuated::<ExposeTraitOption, Comma>::parse_separated_nonempty,
+                        )
+                        .map_err(LangError::ExposeTraitAttrError)?
+                    }
+                    None => Default::default(),
+                };
+                let original_ident = expose_trait_opts
+                    .iter()
+                    .find_map(|opt| match opt {
+                        ExposeTraitOption::Original(_, i) => Some(Ident::new(&i.value(), i.span())),
+                        _ => None,
+                    })
+                    .unwrap_or(ident.clone());
+
+                let mut inputs = sig.inputs.iter().cloned().collect::<Vec<_>>();
+                // inputs[0] = parse_quote!(this: &pyo3::PyObject);
+
+                // let output = &sig.output;
+                // let ty: Type = parse_quote!(fn(#(#inputs),*) #output);
+                // let converted = Self::convert_input(ty)?.expand(ident);
+
+                let inner_ident = format_ident!("rust_{}", original_ident);
+
+                methods.push((sig, inner_ident, original_ident));
+            }
+        }
+        let trait_struct_ident = format_ident!("{}Struct", ident);
+        let supertrait = &tr.supertraits[0];
+        let mut trait_struct: ItemStruct = parse_quote! {
+            pub struct #trait_struct_ident {
+                native: Option<Box<dyn #supertrait + Send>>,
+                #[pyo3(set)]
+                python: Option<pyo3::PyObject>,
+            }
+        };
+        Self::expose_struct(
+            &mut trait_struct,
+            vec![ExposeStructOpts::Subclass].into_iter().collect(),
+            mod_path,
+        )?;
+        extra.push(trait_struct.into());
+
+        let wrap_fns = methods
+            .iter()
+            .map(|(sig, inner_ident, original_ident)| {
+                let inner_ident_str = inner_ident.to_string();
+                let output = &sig.output;
+                let inputs = sig.inputs.iter();
+                let arg_names = sig.inputs.iter().filter_map(|arg| match arg {
+                    FnArg::Receiver(_) => None,
+                    FnArg::Typed(PatType { pat, .. }) => Some(pat.clone()),
+                }).collect::<Vec<_>>();
+
+                let (map_output, out_ty) = match output {
+                    ReturnType::Type(_, ty) => (quote!{ .extract(py)? }, quote! { #ty }),
+                    _ => (quote! { ; Ok(()) }, quote!{ () }),
+                };
+
+                    quote! {
+                        pub fn #inner_ident(#(#inputs),*) #output {
+                            if let Some(native) = &self.native {
+                                native.#original_ident(#(#arg_names),*)
+                            } else if let Some(python) = &self.python {
+                                pyo3::prelude::Python::with_gil(|py| -> pyo3::PyResult<#out_ty> {
+                                    Ok(python.call_method1(py, #inner_ident_str, (#(#arg_names),* ,))?#map_output)
+                                }).expect("Python call failed")
+                            } else {
+                                panic!("`self` reference not found. In your subclass constructor add: `self.python = self`")
+                            }
+                        }
+                    }
+            });
+        let mut impl_block: ItemImpl = parse_quote! {
+            impl #trait_struct_ident {
+                #[constructor]
+                pub fn new() -> Self {
+                    #trait_struct_ident {
+                        native: None,
+                        python: None,
+                    }
+                }
+
+                #(#wrap_fns)*
+            }
+        };
+        Self::expose_impl(&mut impl_block, mod_path)?;
+        extra.push(impl_block.into());
+
+        // Impl the trait on the trait structure
+        let impl_methods = methods.iter().map(|(sig, inner_ident, original_ident)| {
+            let call_args = sig.inputs.iter().filter_map(|arg| match arg {
+                FnArg::Receiver(_) => None,
+                FnArg::Typed(PatType { pat, .. }) => Some(pat.to_token_stream()),
+            });
+
+            quote! {
+                #sig {
+                    self.#inner_ident(#(#call_args),*)
+                }
+            }
+        });
+        let impl_on_trait_struct: ItemImpl = parse_quote! {
+            impl #ident for #trait_struct_ident {
+                #(#impl_methods)*
+            }
+        };
+        extra.push(impl_on_trait_struct.into());
+
+        let into_trait_struct: ItemImpl = parse_quote! {
+            impl<T: 'static + #supertrait + Sized + Send> crate::langs::IntoTraitStruct for T {
+                type Target = #trait_struct_ident;
+
+                fn into_trait_struct(self) -> Self::Target {
+                    #trait_struct_ident {
+                        native: Some(Box::new(self)),
+                        python: None,
+                    }
+                }
+            }
+        };
+        extra.push(into_trait_struct.into());
+
+        Ok(trait_struct_ident)
     }
 
     fn convert_input(ty: Type) -> Result<Input, Self::Error> {

@@ -154,7 +154,6 @@ impl Lang for C {
         extra: &mut Vec<Item>,
     ) -> Result<Ident, Self::Error> {
         let ident = tr.ident.clone();
-        dbg!(&tr);
 
         let mut callbacks = vec![];
         for item in &mut tr.items {
@@ -169,7 +168,7 @@ impl Lang for C {
                         attr.parse_args_with(
                             Punctuated::<ExposeTraitOption, Comma>::parse_separated_nonempty,
                         )
-                        .map_err(CError::ExposeTraitAttrError)?
+                        .map_err(LangError::ExposeTraitAttrError)?
                     }
                     None => Default::default(),
                 };
@@ -194,12 +193,10 @@ impl Lang for C {
             }
         }
 
-        // dbg!(&callbacks);
-
         // Define a structure containing all the callback for the methods
-        let struct_methods = callbacks.iter().map(|(sig, bare_fn, _, _)| {
+        let struct_methods = callbacks.iter().map(|(sig, _, _, _)| {
             let ident = &sig.ident;
-            let output = &bare_fn.output;
+            let output = &sig.output;
             let input_types = sig.inputs.iter().map(|arg| match arg {
                 FnArg::Receiver(_) => Box::new(parse_quote!(*mut libc::c_void)),
                 FnArg::Typed(PatType { ty, .. }) => ty.clone(),
@@ -302,9 +299,9 @@ impl Lang for C {
         let supertrait = &tr.supertraits[0];
         let (wrap_fns, struct_members): (Vec<_>, Vec<_>) = callbacks
             .iter()
-            .map(|(sig, bare_fn, _, original_ident)| {
+            .map(|(sig, _, _, original_ident)| {
                 let ident = &sig.ident;
-                let output = &bare_fn.output;
+                let output = &sig.output;
                 let inputs = sig.inputs.iter().map(|arg| match arg {
                     FnArg::Receiver(_) => parse_quote!(this: *mut libc::c_void),
                     ty @ FnArg::Typed(_) => ty.clone(),
@@ -316,12 +313,10 @@ impl Lang for C {
 
                 (
                     quote! {
-                        fn #ident<T: #supertrait>(#(#inputs),*) {
+                        fn #ident<T: #supertrait>(#(#inputs),*) #output {
                             let this = take_ptr::<T>(this);
 
-                            let result = {
-                                this.#original_ident(#(#arg_names),*);
-                            };
+                            let result = this.#original_ident(#(#arg_names),*);
 
                             std::mem::forget(this);
                             return result;
@@ -333,7 +328,7 @@ impl Lang for C {
             .unzip();
 
         let into_trait_struct: ItemImpl = parse_quote! {
-            impl<T: 'static + #supertrait + Sized> crate::langs::IntoTraitStruct for T {
+            impl<T: 'static + #supertrait + Sized + Send> crate::langs::IntoTraitStruct for T {
                 type Target = #trait_struct_ident;
 
                 fn into_trait_struct(self) -> Self::Target {
@@ -537,8 +532,6 @@ pub enum CError {
     UnnamedCallbackArguments(Span),
     DestructorReceiverArgument(Span),
     InvalidResult(Span),
-
-    ExposeTraitAttrError(syn::Error),
 }
 
 impl fmt::Display for CError {

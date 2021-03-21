@@ -4,6 +4,8 @@ use syn::{Lit, LitStr};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExposeStructOpts {
     Opaque,
+    #[cfg(feature = "python")]
+    Subclass,
 }
 
 impl Parse for ExposeStructOpts {
