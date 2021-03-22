@@ -44,3 +44,10 @@ pub trait IntoTraitStruct: Sized {
 pub fn take_ptr<I>(this: *mut libc::c_void) -> Box<I> {
     unsafe { Box::from_raw(this as *mut I) }
 }
+
+#[repr(C)]
+#[derive(Clone, Debug)]
+pub struct Arr<T> {
+    pub ptr: *const T,
+    pub len: usize,
+}

@@ -1,3 +1,7 @@
+use pyo3::prelude::*;
+
+use crate::common::*;
+
 pub struct PyCb<'source>(&'source pyo3::PyAny);
 
 impl<'source> std::ops::Deref for PyCb<'source> {
@@ -19,6 +23,22 @@ impl<'source> pyo3::conversion::FromPyObject<'source> for PyCb<'source> {
         }
     }
 }
+
+pub struct MyVec<T>(pub Vec<T>);
+
+impl<T> std::ops::Deref for MyVec<T> {
+    type Target = Vec<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl<T> std::ops::DerefMut for MyVec<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+// TODO: impl IntoIterator, FromIterator
 
 // #[pyo3::prelude::pyproto]
 // impl<T> pyo3::class::PyObjectProtocol for T

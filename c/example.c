@@ -3,25 +3,21 @@
 
 #include "bindings.h"
 
-static void trait_destroy(__attribute__((unused)) void *self) {}
-
-static const char* trait_method(__attribute__((unused)) void *self, char *s) {
-    printf("Printing from C: `%s`\n", s);
-    free(s);
-
-    // TODO: we are leaking memory if we return something allocated on the heap
-    return "String from C";
-}
+#define BDK_BYTE_ARR(arr, size) (Arr_u8){ arr, size }
 
 int main() {
-    MyTraitStruct *ts_from_lib = NULL;
-    impl_my_trait_new(42, &ts_from_lib);
-    use_trait(ts_from_lib);
-    my_trait_struct_destroy(ts_from_lib);
+    const uint8_t b[] = {0x88, 0xac};
 
-    MyTraitStruct *ts = NULL;
-    my_trait_struct_new(NULL, trait_destroy, trait_method, &ts);
-    use_trait(ts);
-    my_trait_struct_destroy(ts);
+    Script *s = NULL;
+    script_new(BDK_BYTE_ARR(b, sizeof(b)), &s);
 
+    char *s_hex = script_to_hex(s);
+    printf("Script hex: %s\n", s_hex);
+    free(s_hex);
+
+    char *s_asm = script_asm(s);
+    printf("Script asm: %s\n", s_asm);
+    free(s_asm);
+
+    return 0;
 }

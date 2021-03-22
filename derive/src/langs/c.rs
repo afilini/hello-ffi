@@ -21,7 +21,7 @@ pub struct C;
 impl Lang for C {
     type Error = CError;
 
-    fn expose_fn(function: &mut ItemFn, mod_path: &Vec<Ident>) -> Result<Ident, Self::Error> {
+    fn expose_fn(function: &mut ItemFn, _mod_path: &Vec<Ident>) -> Result<Ident, Self::Error> {
         if let Some(pos) = function
             .attrs
             .iter()
@@ -68,7 +68,7 @@ impl Lang for C {
 
                 #input_conversion
 
-                let block_closure = move || { #block };
+                let mut block_closure = move || { #block };
                 let __output = block_closure();
                 #output_conversion
             }
@@ -79,8 +79,8 @@ impl Lang for C {
 
     fn expose_mod(
         module: &mut ItemMod,
-        mod_path: &Vec<Ident>,
-        sub_items: Vec<ModuleItem>,
+        _mod_path: &Vec<Ident>,
+        _sub_items: Vec<ModuleItem>,
     ) -> Result<Ident, Self::Error> {
         module.vis = parse_quote!(pub);
 
@@ -90,7 +90,7 @@ impl Lang for C {
     fn expose_struct(
         structure: &mut ItemStruct,
         opts: Punctuated<ExposeStructOpts, Token![,]>,
-        mod_path: &Vec<Ident>,
+        _mod_path: &Vec<Ident>,
     ) -> Result<Ident, Self::Error> {
         if opts
             .iter()
@@ -150,7 +150,7 @@ impl Lang for C {
 
     fn expose_trait(
         tr: &mut ItemTrait,
-        mod_path: &Vec<Ident>,
+        _mod_path: &Vec<Ident>,
         extra: &mut Vec<Item>,
     ) -> Result<Ident, Self::Error> {
         let ident = tr.ident.clone();
@@ -176,7 +176,6 @@ impl Lang for C {
                     .iter()
                     .find_map(|opt| match opt {
                         ExposeTraitOption::Original(_, i) => Some(Ident::new(&i.value(), i.span())),
-                        _ => None,
                     })
                     .unwrap_or(ident.clone());
 
@@ -362,6 +361,9 @@ impl Lang for C {
                 ty,
                 vec![parse_quote!(*const libc::c_char)],
             ))
+        } else if ty == parse_quote!([u8; 32]) {
+            // TODO: make more generic
+            Ok(Input::new_map_from(ty, vec![parse_quote!(*const u8)]))
         } else if let Some(inner) = match_generic_type(&ty, parse_quote!(Vec)) {
             let inner = inner
                 .into_iter()
@@ -371,11 +373,12 @@ impl Lang for C {
             let sources = inner
                 .get_sources()
                 .into_iter()
-                .collect::<Punctuated<_, Comma>>(); // TODO: as_tuple() ?
+                .map(|t| *t.clone())
+                .as_tuple();
 
             Ok(Input::new_map_from(
                 ty,
-                vec![parse_quote!(*const #sources), parse_quote!(usize)],
+                vec![parse_quote!(crate::langs::Arr<#sources>)],
             ))
         } else if let Some(inner) = match_generic_type(&ty, parse_quote!(Destroy)) {
             let inner = inner
@@ -386,7 +389,8 @@ impl Lang for C {
             let sources = inner
                 .get_sources()
                 .into_iter()
-                .collect::<Punctuated<_, Comma>>(); // TODO: as_tuple() ?
+                .map(|t| *t.clone())
+                .as_tuple();
 
             Ok(Input::new_map_from(ty, vec![parse_quote!(*mut #sources)]))
         } else if let Type::BareFn(ref old_bare_fn) = ty {
@@ -457,16 +461,14 @@ impl Lang for C {
                 output,
                 parse_quote!(*mut libc::c_char),
             ))
+        } else if output == parse_quote!(&[u8]) {
+            Ok(Output::new_map_to_single(output, parse_quote!(*const u8)))
         } else if output == parse_quote!(BitcoinError) {
             Ok(Output::new_map_to_single(output, parse_quote!(i32)))
         } else if output == parse_quote!(Script) {
             Ok(Output::ByReference(Box::new(parse_quote!(*mut Script))))
         } else if output == parse_quote!(Network) {
             Ok(Output::ByReference(Box::new(parse_quote!(*mut Network))))
-        } else if output == parse_quote!(MyTraitStruct) {
-            Ok(Output::ByReference(Box::new(parse_quote!(
-                *mut MyTraitStruct
-            ))))
         } else if let Some(inner) = match_generic_type(&output, parse_quote!(Vec)) {
             let inner = inner
                 .into_iter()

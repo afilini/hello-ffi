@@ -8,7 +8,7 @@ edition = "2018"
 crate-type = ["dylib"]
 
 [dependencies]
-bdk = "0.4"
+bdk = "0.5"
 derive = { path = "./derive", features = ["debug"] }
 libc = { version = "0.2", optional = true}
 pyo3 = { version = "0.13", features = ["extension-module"], optional = true }

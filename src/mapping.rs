@@ -23,6 +23,7 @@ impl<T> MapTo<T> for T {
 #[cfg(feature = "c")]
 mod c_mapping {
     use super::{MapFrom, MapTo};
+    use crate::langs::*;
 
     impl MapFrom<*const libc::c_char> for String {
         fn map_from(s: *const libc::c_char) -> Self {
@@ -39,6 +40,24 @@ mod c_mapping {
         fn map_from((ptr, len): (*const F, usize)) -> Self {
             let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
             slice.to_vec().into_iter().map(T::map_from).collect()
+        }
+    }
+
+    impl<F: Clone, T: MapFrom<F>> MapFrom<Arr<F>> for Vec<T> {
+        fn map_from(arr: Arr<F>) -> Self {
+            let Arr { ptr, len } = arr;
+
+            let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
+            slice.to_vec().into_iter().map(T::map_from).collect()
+        }
+    }
+
+    impl MapFrom<*const u8> for [u8; 32] {
+        fn map_from(ptr: *const u8) -> Self {
+            use std::convert::TryInto;
+
+            let slice = unsafe { std::slice::from_raw_parts(ptr, 32) };
+            slice.try_into().unwrap()
         }
     }
 
@@ -76,6 +95,12 @@ mod c_mapping {
         fn map_to(self) -> *mut T {
             self.map(MapTo::map_to)
                 .unwrap_or_else(|| std::ptr::null_mut())
+        }
+    }
+
+    impl MapTo<*const u8> for &[u8] {
+        fn map_to(self) -> *const u8 {
+            self.as_ptr()
         }
     }
 }

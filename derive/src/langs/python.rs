@@ -50,7 +50,8 @@ impl Lang for Python {
 
                 #input_conversion
 
-                let __output = { #block };
+                let mut block_closure = move || { #block };
+                let __output = block_closure();
 
                 #output_conversion
             }
@@ -108,7 +109,7 @@ impl Lang for Python {
         }
 
         *module = parse_quote! {
-            mod #ident {
+            pub mod #ident {
                 #extra_attrs
                 pub(super) fn #ident(py: pyo3::Python, m: &pyo3::types::PyModule) -> pyo3::PyResult<()> {
                     #export_tokens
@@ -161,7 +162,38 @@ impl Lang for Python {
         });
 
         for item in &mut implementation.items {
-            if let ImplItem::Method(ImplItemMethod { sig, attrs, .. }) = item {
+            if let ImplItem::Method(ImplItemMethod {
+                sig, attrs, block, ..
+            }) = item
+            {
+                let ident = &sig.ident;
+
+                let (mut args, input_conversion) = Self::convert_fn_args(sig.inputs.clone())?;
+                let ExpandedReturn {
+                    ret,
+                    extra_args,
+                    conv: output_conversion,
+                } = Return(sig.output.clone()).expand(
+                    &format_ident!("__output"),
+                    &format_ident!("__ptr_out"),
+                    Self::convert_output,
+                )?;
+                args.extend(extra_args);
+
+                sig.inputs = args;
+                sig.output = ret;
+                block.stmts = parse_quote! {
+                    use crate::mapping::{MapTo, MapFrom};
+                    use crate::langs::*;
+
+                    #input_conversion
+
+                    let mut block_closure = move || { #block };
+                    let __output = block_closure();
+
+                    #output_conversion
+                };
+
                 if let Some(pos) = attrs.iter().position(|a| a.path.is_ident("constructor")) {
                     attrs.remove(pos);
                     attrs.push(parse_quote!( #[new] ));
@@ -346,6 +378,26 @@ impl Lang for Python {
                     ts.into()
                 },
             ))
+        } else if let Some(inner) = match_generic_type(&ty, parse_quote!(Vec)) {
+            match inner.as_slice() {
+                &[Type::Reference(ref reference)] => {
+                    let inner_ty = &reference.elem;
+                    Ok(Input::new_custom(
+                        ty.clone(),
+                        vec![parse_quote!(Vec<pyo3::PyRef<#inner_ty>>)],
+                        move |_, ident| {
+                            let ts = quote! {
+                                {
+                                    use std::ops::Deref;
+                                    #ident.iter().map(|r| r.deref()).collect::<#ty>()
+                                }
+                            };
+                            ts.into()
+                        },
+                    ))
+                }
+                _ => Ok(Input::new_unchanged(ty)),
+            }
         } else {
             Ok(Input::new_unchanged(ty))
         }

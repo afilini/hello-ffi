@@ -65,7 +65,11 @@ fn analyze_module(module: &mut ItemMod, mut path: Vec<Ident>, extra: &mut Vec<It
                     .position(|a| a.path.is_ident("expose_struct"))
                 {
                     let parser = Punctuated::<ExposeStructOpts, Token![,]>::parse_terminated;
-                    let opts = structure.attrs[pos].parse_args_with(parser).unwrap();
+                    let opts = if structure.attrs[pos].tokens.is_empty() {
+                        Default::default()
+                    } else {
+                        structure.attrs[pos].parse_args_with(parser).unwrap()
+                    };
 
                     structure.attrs.remove(pos);
                     check_struct(structure);
