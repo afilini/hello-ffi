@@ -75,7 +75,7 @@ fn analyze_module(module: &mut ItemMod, mut path: Vec<Ident>, extra: &mut Vec<It
                     check_struct(structure);
 
                     sub_items.push(ModuleItem::Structure(
-                        CurrentLang::expose_struct(structure, opts, &path).unwrap(),
+                        CurrentLang::expose_struct(structure, opts, &path, extra).unwrap(),
                     ));
                 }
             }
@@ -148,10 +148,12 @@ pub fn expose_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
     let parser = Punctuated::<ExposeStructOpts, Token![,]>::parse_terminated;
     let opts = attr.parse_args_with(parser).unwrap();
 
-    CurrentLang::expose_struct(&mut input, opts, &vec![]).unwrap();
+    let mut extra = vec![];
+    CurrentLang::expose_struct(&mut input, opts, &vec![], &mut extra).unwrap();
 
     (quote! {
         #input
+        #(#extra)*
     })
     .into()
 }

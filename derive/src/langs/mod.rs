@@ -14,6 +14,9 @@ use syn::{
 
 use crate::types::*;
 
+#[macro_use]
+pub mod common_mapping;
+
 #[cfg(feature = "c")]
 pub mod c;
 #[cfg(feature = "python")]
@@ -34,6 +37,7 @@ pub trait Lang {
         structure: &mut ItemStruct,
         opts: Punctuated<ExposeStructOpts, Token![,]>,
         mod_path: &Vec<Ident>,
+        extra: &mut Vec<Item>,
     ) -> Result<Ident, Self::Error>;
 
     fn expose_impl(implementation: &mut ItemImpl, mod_path: &Vec<Ident>)
@@ -108,6 +112,9 @@ pub enum LangError {
 
     /// Invalid attributes given to `#[expose_trait]`
     ExposeTraitAttrError(syn::Error),
+
+    /// Invalid attribute options in `#[expose_struct]`
+    ExposeStructAttrError(syn::Error),
 }
 
 impl fmt::Display for LangError {

@@ -454,6 +454,13 @@ impl Lang for C {
     }
 
     fn convert_output(output: Type) -> Result<Output, Self::Error> {
+        // Return our opaque types by reference
+        for t in &our_opaque_types!() {
+            if t == &output {
+                return Ok(Output::ByReference(Box::new(parse_quote!(*mut #t))));
+            }
+        }
+
         if output == parse_quote!(Self) {
             Ok(Output::ByReference(Box::new(parse_quote!(*mut Self))))
         } else if output == parse_quote!(String) {
@@ -465,10 +472,6 @@ impl Lang for C {
             Ok(Output::new_map_to_single(output, parse_quote!(*const u8)))
         } else if output == parse_quote!(BitcoinError) {
             Ok(Output::new_map_to_single(output, parse_quote!(i32)))
-        } else if output == parse_quote!(Script) {
-            Ok(Output::ByReference(Box::new(parse_quote!(*mut Script))))
-        } else if output == parse_quote!(Network) {
-            Ok(Output::ByReference(Box::new(parse_quote!(*mut Network))))
         } else if let Some(inner) = match_generic_type(&output, parse_quote!(Vec)) {
             let inner = inner
                 .into_iter()

@@ -33,8 +33,48 @@ pub mod bitcoin_mod;
 //     }
 // }
 
-// #[expose_mod]
-// mod test_mod {
+#[expose_mod]
+mod test_mod {
+    #[expose_struct("opaque")]
+    struct Inner {
+        val: u32
+    }
+    impl Clone for Inner {
+        fn clone(&self) -> Self {
+            Inner { val: self.val }
+        }
+    }
+
+    #[expose_impl]
+    impl Inner {
+        #[constructor]
+        fn new(val: u32) -> Self {
+            Inner {
+                val,
+            }
+        }
+    }
+
+    #[expose_struct("opaque")]
+    struct Outer {
+        #[expose_struct(get, set)]
+        inner: Inner,
+    }
+
+    #[expose_impl]
+    impl Outer {
+        #[constructor]
+        fn new(inner: &Inner) -> Self {
+            let inner = inner.clone();
+
+            #[cfg(feature = "python")]
+            let inner = pyo3::Py::new(py, inner).expect("Unable to allocate cell");
+
+            Outer {
+                inner
+            }
+        }
+    }
 //     #[expose_struct("opaque")]
 //     struct ImplMyTrait {
 //         inner: super::ImplMyTrait,
@@ -67,4 +107,4 @@ pub mod bitcoin_mod;
 //         let ret = t.method("Hello from Rust".to_string());
 //         println!("Returned: {}", ret);
 //     }
-// }
+}

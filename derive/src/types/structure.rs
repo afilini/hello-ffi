@@ -1,9 +1,12 @@
 use syn::parse::{Parse, ParseStream};
-use syn::{Lit, LitStr};
+use syn::{Lit, LitStr, Path};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ExposeStructOpts {
     Opaque,
+    Get,
+    Set,
+
     #[cfg(feature = "python")]
     Subclass,
 }
@@ -16,6 +19,12 @@ impl Parse for ExposeStructOpts {
             && input.parse::<LitStr>().unwrap().value() == "opaque"
         {
             Ok(ExposeStructOpts::Opaque)
+        } else if let Ok(path) = input.parse::<Path>() {
+            match path.get_ident() {
+                Some(s) if s == "get" => Ok(ExposeStructOpts::Get),
+                Some(s) if s == "set" => Ok(ExposeStructOpts::Set),
+                _ => Err(syn::Error::new(input.span(), "expected one of `get` or `set`")),
+            }
         } else {
             Err(lookahead.error())
         }

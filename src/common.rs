@@ -1,4 +1,10 @@
-pub(crate) trait Sealed {}
+pub(crate) mod sealed {
+    pub trait Sealed {}
+}
+
+pub trait WrappedStruct: sealed::Sealed {
+    type Inner;
+}
 
 #[macro_export]
 macro_rules! wrap_struct {
@@ -8,7 +14,10 @@ macro_rules! wrap_struct {
                 $ident { inner }
             }
         }
-        impl crate::common::Sealed for $ident {}
+        impl crate::common::sealed::Sealed for $ident {}
+        impl crate::common::WrappedStruct for $ident {
+            type Inner = $ty;
+        }
         impl std::ops::Deref for $ident {
             type Target = $ty;
 
@@ -25,6 +34,11 @@ macro_rules! wrap_struct {
             #[allow(dead_code)]
             pub(crate) fn into_inner(self) -> $ty {
                 self.inner
+            }
+        }
+        impl Clone for $ident {
+            fn clone(&self) -> Self {
+                self.deref().clone().into()
             }
         }
     };

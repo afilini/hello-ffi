@@ -8,6 +8,17 @@ print('Script: {}'.format(a.script.to_hex()))
 
 txin = transaction.TxIn(transaction.OutPoint('cdae07af68bc5fab2f294acfa6dc2f9b399ce542901d52aa65d08c8ff3337c48:42'), Script.empty(), 0xFFFFFFFF, [[]])
 txout = transaction.TxOut(a.script, int(0.42 * 1e8))
-tx = transaction.Transaction(1, 0, [txin], [txout])
 
-print('Transaction: {}'.format(tx.to_hex()))
+print(txout.script_pubkey.asm())
+txout.script_pubkey = Script.from_hex('88ac')
+print(txout.script_pubkey.asm())
+
+print(txin.previous_output.to_string())
+print(txin.previous_output.txid)
+txin.previous_output.txid = b'B' * 32;
+print(txin.previous_output.txid)
+print(txin.previous_output.to_string())
+
+# tx = transaction.Transaction(1, 0, [txin], [txout])
+# 
+# print('Transaction: {}'.format(tx.to_hex()))
