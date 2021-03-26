@@ -46,10 +46,8 @@ mod c_mapping {
     impl<F: Clone, T: MapFrom<F>> MapFrom<Arr<F>> for Vec<T> {
         fn map_from(arr: Arr<F>) -> Self {
             let Arr { ptr, len } = arr;
-
-            let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
-            slice.to_vec().into_iter().map(T::map_from).collect()
-        }
+            Self::map_from((ptr, len))
+       }
     }
 
     impl MapFrom<*const u8> for [u8; 32] {
