@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 
@@ -7,9 +8,9 @@ use quote::{format_ident, quote, ToTokens, TokenStreamExt};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::{
-    parse_quote, BareFnArg, Field, FnArg, Ident, ImplItem, ImplItemMethod, Item, ItemFn,
-    ItemStruct, ItemTrait, Pat, PatIdent, PatType, Token, TraitItem, TraitItemMethod, TypeBareFn,
-    TypePath,
+    parse_quote, BareFnArg, Field, Fields, FieldsNamed, FnArg, Ident, ImplItem, ImplItemMethod,
+    Item, ItemFn, ItemStruct, ItemTrait, Pat, PatIdent, PatType, Token, TraitItem, TraitItemMethod,
+    TypeBareFn, TypePath, TypeReference,
 };
 
 use super::*;
@@ -41,6 +42,15 @@ impl Lang for C {
                 }
             }
         }
+        for ignore_attr in &["constructor", "getter", "setter"] {
+            if let Some(pos) = function
+                .attrs
+                .iter()
+                .position(|a| a.path.is_ident(ignore_attr))
+            {
+                function.attrs.remove(pos);
+            }
+        }
 
         let ident = &function.sig.ident;
 
@@ -58,10 +68,12 @@ impl Lang for C {
         args.extend(extra_args);
 
         let block = &function.block;
+        let attrs = &function.attrs;
 
         *function = parse_quote! {
             #[no_mangle]
             #[allow(non_snake_case)]
+            #(#attrs)*
             pub extern "C" fn #ident(#args) #ret {
                 use crate::mapping::{MapFrom, MapTo};
                 use crate::langs::*;
@@ -90,17 +102,37 @@ impl Lang for C {
     fn expose_struct(
         structure: &mut ItemStruct,
         opts: Punctuated<ExposeStructOpts, Token![,]>,
-        _mod_path: &Vec<Ident>,
+        mod_path: &Vec<Ident>,
+        extra: &mut Vec<Item>,
     ) -> Result<Ident, Self::Error> {
-        if opts
+        let ident = structure.ident.clone();
+        let is_opaque = opts
             .iter()
             .find(|o| **o == ExposeStructOpts::Opaque)
-            .is_none()
-        {
+            .is_some();
+
+        if !is_opaque {
             structure.attrs.push(parse_quote!(#[repr(C)]));
         }
+        structure.vis = parse_quote!(pub);
 
-        Ok(structure.ident.clone())
+        let (impl_block, wrapped_fields) =
+            Self::generate_getters_setters(structure, is_opaque, mod_path)?;
+        extra.push(impl_block.into());
+
+        let wrapped_fields = wrapped_fields
+            .into_iter()
+            .map(|field| quote! { let _free = unsafe { Box::from_raw(self.#field) }; });
+        let custom_destructor: ItemImpl = parse_quote! {
+            impl Drop for #ident {
+                fn drop(&mut self) {
+                    #(#wrapped_fields)*
+                }
+            }
+        };
+        extra.push(custom_destructor.into());
+
+        Ok(ident)
     }
 
     fn expose_impl(
@@ -355,7 +387,83 @@ impl Lang for C {
         Ok(ident)
     }
 
+    fn expose_getter(
+        structure: &Ident,
+        field: &mut Field,
+        is_opaque: bool,
+        impl_block: &mut ItemImpl,
+    ) -> Result<(), Self::Error> {
+        if !is_opaque {
+            return Ok(());
+        }
+
+        let old_ty = &field.ty;
+        let field_ident = field.ident.as_ref().expect("Missing field ident");
+        let getter_name = format_ident!("get_{}", field_ident);
+        let getter: ImplItemMethod = parse_quote! {
+            #[getter]
+            fn #getter_name(&self) -> *mut #old_ty {
+                self.#field_ident
+            }
+        };
+        impl_block.items.push(getter.into());
+
+        Ok(())
+    }
+
+    fn expose_setter(
+        structure: &Ident,
+        field: &mut Field,
+        is_opaque: bool,
+        impl_block: &mut ItemImpl,
+    ) -> Result<(), Self::Error> {
+        if !is_opaque {
+            return Ok(());
+        }
+
+        let old_ty = &field.ty;
+        let field_ident = field.ident.as_ref().expect("Missing field ident");
+        let setter_name = format_ident!("set_{}", field_ident);
+        let setter: ImplItemMethod = parse_quote! {
+            #[setter]
+            fn #setter_name(&mut self, #field_ident: &#old_ty) {
+                let _free = unsafe { Box::from_raw(self.#field_ident) };
+                self.#field_ident = #field_ident;
+            }
+        };
+        impl_block.items.push(setter.into());
+
+        Ok(())
+    }
+
+    fn wrap_field_type(ty: Type) -> Result<Type, Self::Error> {
+        Ok(parse_quote!(*mut #ty))
+    }
+
     fn convert_input(ty: Type) -> Result<Input, Self::Error> {
+        match ty {
+            Type::Reference(TypeReference { ref elem, .. })
+                if elem.as_ref() == &parse_quote!(Inner) =>
+            {
+                let elem = elem.clone();
+
+                return Ok(Input::new_custom(
+                    parse_quote!(*mut #elem),
+                    vec![ty.clone()],
+                    move |_, ident| {
+                        let ts = quote! {
+                            {
+                                let #ident: #elem = #ident.clone();
+                                MapFrom::map_from(#ident)
+                            }
+                        };
+                        ts.into()
+                    },
+                ));
+            }
+            _ => {}
+        }
+
         if match_fixed_type(&ty, parse_quote!(String)) {
             Ok(Input::new_map_from(
                 ty,

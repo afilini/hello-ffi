@@ -7,8 +7,8 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote, ToTokens, TokenStreamExt};
 use syn::punctuated::Punctuated;
 use syn::{
-    parse_quote, Attribute, FnArg, Ident, ImplItem, ImplItemMethod, Item, ItemFn, Pat, PatIdent,
-    PatType, Token, TraitItem, TraitItemMethod, TypeReference, Fields, FieldsNamed,
+    parse_quote, Attribute, Fields, FieldsNamed, FnArg, Ident, ImplItem, ImplItemMethod, Item,
+    ItemFn, Pat, PatIdent, PatType, Token, TraitItem, TraitItemMethod, TypeReference,
 };
 
 use super::*;
@@ -129,7 +129,7 @@ impl Lang for Python {
         mod_path: &Vec<Ident>,
         extra: &mut Vec<Item>,
     ) -> Result<Ident, Self::Error> {
-        let ident = &structure.ident;
+        let ident = structure.ident.clone();
         let attr = if opts
             .iter()
             .find(|o| **o == ExposeStructOpts::Subclass)
@@ -141,65 +141,11 @@ impl Lang for Python {
         };
         structure.attrs.push(attr);
 
-        if let Fields::Named(FieldsNamed { named, .. }) = &mut structure.fields {
-            for field in named {
-                if let Some(pos) = field
-                    .attrs
-                    .iter()
-                    .position(|a| a.path.is_ident("expose_struct")) {
-                    let parser = Punctuated::<ExposeStructOpts, Token![,]>::parse_terminated;
-                    let parsed_attrs = field.attrs[pos].parse_args_with(parser).map_err(LangError::ExposeTraitAttrError)?;
-                    let parsed_attrs = parsed_attrs.into_iter().collect::<HashSet<_>>();
-                    field.attrs.remove(pos);
+        let (impl_block, wrapped_fields) =
+            Self::generate_getters_setters(structure, true, mod_path)?;
+        extra.push(impl_block.into());
 
-                    let mut wrap_type = false;
-                    let old_ty = &field.ty;
-
-                    if parsed_attrs.contains(&ExposeStructOpts::Get) {
-                        wrap_type = true;
-
-                        let field_ident = field.ident.as_ref().expect("Missing field ident");
-                        let getter_name = format_ident!("get_{}", field_ident);
-                        let mut item: ItemImpl = parse_quote! {
-                            impl #ident {
-                                #[getter]
-                                fn #getter_name(&self, py: pyo3::Python) -> pyo3::Py<#old_ty> {
-                                    self.#field_ident.clone_ref(py)
-                                }
-                            }
-                        };
-                        Self::expose_impl(&mut item, mod_path)?;
-                        extra.push(item.into());
-                    }
-                    if parsed_attrs.contains(&ExposeStructOpts::Set) {
-                        wrap_type = true;
-
-                        let field_ident = field.ident.as_ref().expect("Missing field ident");
-                        let setter_name = format_ident!("set_{}", field_ident);
-                        let mut item: ItemImpl = parse_quote! {
-                            impl #ident {
-                                #[setter]
-                                fn #setter_name(&mut self, py: pyo3::Python, #field_ident: #old_ty) -> pyo3::PyResult<()> {
-                                    self.#field_ident = pyo3::Py::new(py, #field_ident)?;
-                                    Ok(())
-                                }
-                            }
-                        };
-                        Self::expose_impl(&mut item, mod_path)?;
-                        extra.push(item.into());
-                    }
-
-                    if wrap_type {
-                        field.ty = parse_quote!(pyo3::Py<#old_ty>);
-                        field.vis = parse_quote!( pub(crate) );
-                    }
-                }
-            }
-
-            
-        }
-
-        Ok(ident.clone())
+        Ok(ident)
     }
 
     fn expose_impl(
@@ -245,7 +191,7 @@ impl Lang for Python {
                     attrs.push(parse_quote!( #[new] ));
                     attrs.push(parse_quote!( #[allow(unused_variables)] ));
 
-                    args.push(parse_quote!( py: pyo3::Python<'_> ));
+                    args.push(parse_quote!(py: pyo3::Python<'_>));
                 } else {
                     match args.first() {
                         // the first argument is not some kind of "self", so this is a static method
@@ -417,13 +363,62 @@ impl Lang for Python {
         Ok(trait_struct_ident)
     }
 
+    fn expose_getter(
+        structure: &Ident,
+        field: &mut Field,
+        _is_opaque: bool,
+        impl_block: &mut ItemImpl,
+    ) -> Result<(), Self::Error> {
+        let old_ty = &field.ty;
+        let field_ident = field.ident.as_ref().expect("Missing field ident");
+        let getter_name = format_ident!("get_{}", field_ident);
+        let getter: ImplItemMethod = parse_quote! {
+            #[getter]
+            fn #getter_name(&self, py: pyo3::Python) -> pyo3::Py<#old_ty> {
+                self.#field_ident.clone_ref(py)
+            }
+        };
+        impl_block.items.push(getter.into());
+
+        Ok(())
+    }
+
+    fn expose_setter(
+        structure: &Ident,
+        field: &mut Field,
+        _is_opaque: bool,
+        impl_block: &mut ItemImpl,
+    ) -> Result<(), Self::Error> {
+        let old_ty = &field.ty;
+        let field_ident = field.ident.as_ref().expect("Missing field ident");
+        let setter_name = format_ident!("set_{}", field_ident);
+        let setter: ImplItemMethod = parse_quote! {
+            #[setter]
+            fn #setter_name(&mut self, py: pyo3::Python, #field_ident: #old_ty) -> pyo3::PyResult<()> {
+                self.#field_ident = pyo3::Py::new(py, #field_ident)?;
+                Ok(())
+            }
+        };
+        impl_block.items.push(setter.into());
+
+        Ok(())
+    }
+
+    fn wrap_field_type(ty: Type) -> Result<Type, Self::Error> {
+        Ok(parse_quote!(pyo3::Py<#ty>))
+    }
+
     fn convert_input(ty: Type) -> Result<Input, Self::Error> {
         // Take our opaque types as PyRef/PyRefMut instead of normal refs
         for t in &our_opaque_types!() {
             match ty {
-                Type::Reference(TypeReference { ref elem, ref mutability, .. }) if elem.as_ref() == t => {
+                Type::Reference(TypeReference {
+                    ref elem,
+                    ref mutability,
+                    ..
+                }) if elem.as_ref() == t => {
                     let (wrap_ty, method) = match mutability {
-                        Some(_) => (quote! { PyRefMut }, quote!{ deref_mut }),
+                        Some(_) => (quote! { PyRefMut }, quote! { deref_mut }),
                         None => (quote! { PyRef }, quote! { deref }),
                     };
 
@@ -443,6 +438,30 @@ impl Lang for Python {
                 }
                 _ => continue,
             }
+        }
+
+        match ty {
+            Type::Reference(TypeReference { ref elem, .. })
+                if elem.as_ref() == &parse_quote!(Inner) =>
+            {
+                let elem = elem.clone();
+
+                return Ok(Input::new_custom(
+                    parse_quote!(pyo3::Py<#elem>),
+                    vec![ty.clone()],
+                    move |_, ident| {
+                        let ts = quote! {
+                            {
+                                // TODO: handle errors
+                                let #ident: #elem = #ident.clone();
+                                MapFrom::map_from(#ident)
+                            }
+                        };
+                        ts.into()
+                    },
+                ));
+            }
+            _ => {}
         }
 
         if let Type::BareFn(ref bare_fn) = ty {

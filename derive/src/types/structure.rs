@@ -23,7 +23,10 @@ impl Parse for ExposeStructOpts {
             match path.get_ident() {
                 Some(s) if s == "get" => Ok(ExposeStructOpts::Get),
                 Some(s) if s == "set" => Ok(ExposeStructOpts::Set),
-                _ => Err(syn::Error::new(input.span(), "expected one of `get` or `set`")),
+                _ => Err(syn::Error::new(
+                    input.span(),
+                    "expected one of `get` or `set`",
+                )),
             }
         } else {
             Err(lookahead.error())

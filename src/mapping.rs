@@ -47,7 +47,7 @@ mod c_mapping {
         fn map_from(arr: Arr<F>) -> Self {
             let Arr { ptr, len } = arr;
             Self::map_from((ptr, len))
-       }
+        }
     }
 
     impl MapFrom<*const u8> for [u8; 32] {
@@ -56,6 +56,12 @@ mod c_mapping {
 
             let slice = unsafe { std::slice::from_raw_parts(ptr, 32) };
             slice.try_into().unwrap()
+        }
+    }
+
+    impl<T> MapFrom<T> for *mut T {
+        fn map_from(t: T) -> Self {
+            Box::into_raw(Box::new(t))
         }
     }
 
@@ -104,3 +110,28 @@ mod c_mapping {
 }
 #[cfg(feature = "c")]
 pub use c_mapping::*;
+
+#[cfg(feature = "python")]
+mod python_mapping {
+    use pyo3::prelude::*;
+    use pyo3::pyclass::PyClass;
+    use pyo3::pyclass_init::PyClassInitializer;
+    use pyo3::type_object::{PyBorrowFlagLayout, PyTypeInfo};
+
+    use super::*;
+
+    impl<T> MapFrom<T> for pyo3::Py<T>
+    where
+        T: pyo3::PyTypeInfo + Into<PyClassInitializer<T>> + PyClass,
+        <T as PyTypeInfo>::BaseLayout: PyBorrowFlagLayout<<T as PyTypeInfo>::BaseType>,
+    {
+        fn map_from(owned: T) -> Self {
+            pyo3::prelude::Python::with_gil(move |py| -> pyo3::PyResult<pyo3::Py<T>> {
+                Ok(pyo3::Py::new(py, owned)?)
+            })
+            .expect("Unable to allocate cell")
+        }
+    }
+}
+#[cfg(feature = "python")]
+pub use python_mapping::*;

@@ -15,8 +15,8 @@ compile_error!("Enable at most one language");
 #[macro_use]
 mod common;
 
-pub mod bdk_mod;
-pub mod bitcoin_mod;
+// pub mod bdk_mod;
+// pub mod bitcoin_mod;
 
 // pub trait MyTrait {
 //     fn method(&self, s: String) -> String;
@@ -35,9 +35,9 @@ pub mod bitcoin_mod;
 
 #[expose_mod]
 mod test_mod {
-    #[expose_struct("opaque")]
+    #[expose_struct]
     struct Inner {
-        val: u32
+        val: u32,
     }
     impl Clone for Inner {
         fn clone(&self) -> Self {
@@ -49,9 +49,18 @@ mod test_mod {
     impl Inner {
         #[constructor]
         fn new(val: u32) -> Self {
-            Inner {
-                val,
-            }
+            Inner { val }
+        }
+
+        #[cfg(feature = "python")]
+        #[getter]
+        fn get_val(&self) -> u32 {
+            self.val
+        }
+        #[cfg(feature = "python")]
+        #[setter]
+        fn set_val(&mut self, val: u32) {
+            self.val = val;
         }
     }
 
@@ -65,46 +74,41 @@ mod test_mod {
     impl Outer {
         #[constructor]
         fn new(inner: &Inner) -> Self {
-            let inner = inner.clone();
-
-            #[cfg(feature = "python")]
-            let inner = pyo3::Py::new(py, inner).expect("Unable to allocate cell");
-
-            Outer {
-                inner
-            }
+            Outer { inner }
         }
+        #[destructor]
+        fn destroy(_s: Self) {}
     }
-//     #[expose_struct("opaque")]
-//     struct ImplMyTrait {
-//         inner: super::ImplMyTrait,
-//     }
-//     impl ImplMyTrait {
-//         fn into_inner(self) -> super::ImplMyTrait {
-//             self.inner
-//         }
-//     }
-//     #[expose_fn]
-//     fn impl_my_trait_new(val: u32) -> MyTraitStruct {
-//         super::ImplMyTrait(val).into_trait_struct()
-//     }
-//
-//     #[expose_trait]
-//     pub trait MyTrait: super::MyTrait {
-//         #[expose_trait(original = "method")]
-//         fn _wrapper_method(&self, s: String) -> String;
-//     }
-//     impl super::MyTrait for MyTraitStruct {
-//         fn method(&self, s: String) -> String {
-//             self._wrapper_method(s)
-//         }
-//     }
-//
-//     #[expose_fn]
-//     fn use_trait(t: &MyTraitStruct) {
-//         use super::MyTrait;
-//
-//         let ret = t.method("Hello from Rust".to_string());
-//         println!("Returned: {}", ret);
-//     }
+    //     #[expose_struct("opaque")]
+    //     struct ImplMyTrait {
+    //         inner: super::ImplMyTrait,
+    //     }
+    //     impl ImplMyTrait {
+    //         fn into_inner(self) -> super::ImplMyTrait {
+    //             self.inner
+    //         }
+    //     }
+    //     #[expose_fn]
+    //     fn impl_my_trait_new(val: u32) -> MyTraitStruct {
+    //         super::ImplMyTrait(val).into_trait_struct()
+    //     }
+    //
+    //     #[expose_trait]
+    //     pub trait MyTrait: super::MyTrait {
+    //         #[expose_trait(original = "method")]
+    //         fn _wrapper_method(&self, s: String) -> String;
+    //     }
+    //     impl super::MyTrait for MyTraitStruct {
+    //         fn method(&self, s: String) -> String {
+    //             self._wrapper_method(s)
+    //         }
+    //     }
+    //
+    //     #[expose_fn]
+    //     fn use_trait(t: &MyTraitStruct) {
+    //         use super::MyTrait;
+    //
+    //         let ret = t.method("Hello from Rust".to_string());
+    //         println!("Returned: {}", ret);
+    //     }
 }

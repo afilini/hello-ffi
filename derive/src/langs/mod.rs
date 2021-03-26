@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::fmt;
 
@@ -7,9 +8,9 @@ use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
 use syn::{
-    parse_quote, FnArg, Ident, Item, ItemFn, ItemImpl, ItemMod, ItemStruct, ItemTrait, Lit, LitStr,
-    ParenthesizedGenericArguments, Pat, PatIdent, PatType, Path, PathArguments, ReturnType, Token,
-    Type,
+    parse_quote, Field, Fields, FieldsNamed, FnArg, Ident, Item, ItemFn, ItemImpl, ItemMod,
+    ItemStruct, ItemTrait, Lit, LitStr, ParenthesizedGenericArguments, Pat, PatIdent, PatType,
+    Path, PathArguments, ReturnType, Token, Type,
 };
 
 use crate::types::*;
@@ -49,6 +50,22 @@ pub trait Lang {
         extra: &mut Vec<Item>,
     ) -> Result<Ident, Self::Error>;
 
+    fn expose_getter(
+        structure: &Ident,
+        field: &mut Field,
+        is_opaque: bool,
+        impl_block: &mut ItemImpl,
+    ) -> Result<(), Self::Error>;
+
+    fn expose_setter(
+        structure: &Ident,
+        field: &mut Field,
+        is_opaque: bool,
+        impl_block: &mut ItemImpl,
+    ) -> Result<(), Self::Error>;
+
+    fn wrap_field_type(ty: Type) -> Result<Type, Self::Error>;
+
     fn convert_input(ty: Type) -> Result<Input, Self::Error>;
 
     fn convert_output(output: Type) -> Result<Output, Self::Error>;
@@ -74,6 +91,70 @@ pub trait Lang {
                     (fold_args, fold_conv)
                 },
             ))
+    }
+
+    fn generate_getters_setters(
+        structure: &mut ItemStruct,
+        is_opaque: bool,
+        mod_path: &Vec<Ident>,
+    ) -> Result<(ItemImpl, Vec<Ident>), Self::Error> {
+        let structure_ident = structure.ident.clone();
+
+        let mut impl_block: ItemImpl = parse_quote! {
+            impl #structure_ident {
+            }
+        };
+
+        let mut wrapped_fields = vec![];
+
+        if let Fields::Named(FieldsNamed { named, .. }) = &mut structure.fields {
+            for mut field in named {
+                if let Some(pos) = field
+                    .attrs
+                    .iter()
+                    .position(|a| a.path.is_ident("expose_struct"))
+                {
+                    let parser = Punctuated::<ExposeStructOpts, Token![,]>::parse_terminated;
+                    let parsed_attrs = field.attrs[pos]
+                        .parse_args_with(parser)
+                        .map_err(LangError::ExposeTraitAttrError)?;
+                    let parsed_attrs = parsed_attrs.into_iter().collect::<HashSet<_>>();
+                    field.attrs.remove(pos);
+
+                    let mut wrap_type = false;
+                    if parsed_attrs.contains(&ExposeStructOpts::Get) {
+                        wrap_type = true;
+                        Self::expose_getter(
+                            &structure.ident,
+                            &mut field,
+                            is_opaque,
+                            &mut impl_block,
+                        )?;
+                    }
+                    if parsed_attrs.contains(&ExposeStructOpts::Set) {
+                        wrap_type = true;
+                        Self::expose_setter(
+                            &structure.ident,
+                            &mut field,
+                            is_opaque,
+                            &mut impl_block,
+                        )?;
+                    }
+
+                    if wrap_type {
+                        field.ty = Self::wrap_field_type(field.ty.clone())?;
+                        field.vis = parse_quote!( pub(crate) );
+
+                        let field_ident = field.ident.as_ref().expect("Missing field ident");
+                        wrapped_fields.push(field_ident.clone());
+                    }
+                }
+            }
+        }
+
+        Self::expose_impl(&mut impl_block, mod_path)?;
+
+        Ok((impl_block, wrapped_fields))
     }
 }
 

@@ -1,4 +1,4 @@
-use syn::{Type, parse_quote};
+use syn::{parse_quote, Type};
 
 macro_rules! our_opaque_types {
     () => {

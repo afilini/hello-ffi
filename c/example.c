@@ -3,21 +3,20 @@
 
 #include "bindings.h"
 
-#define BDK_BYTE_ARR(arr, size) (Arr_u8){ arr, size }
-
 int main() {
-    const uint8_t b[] = {0x88, 0xac};
+    Inner i = { .val = 10 };
 
-    Script *s = NULL;
-    script_new(BDK_BYTE_ARR(b, sizeof(b)), &s);
+    Outer *o = NULL;
+    outer_new(&i, &o);
 
-    char *s_hex = script_to_hex(s);
-    printf("Script hex: %s\n", s_hex);
-    free(s_hex);
+    printf("%u\n", outer_get_inner(o)->val);
+    outer_get_inner(o)->val *= 5;
+    printf("%u\n", outer_get_inner(o)->val);
 
-    char *s_asm = script_asm(s);
-    printf("Script asm: %s\n", s_asm);
-    free(s_asm);
+    Inner i2 = { .val = 1000 };
+    outer_set_inner(o, &i2);
 
-    return 0;
+    printf("%u\n", outer_get_inner(o)->val);
+
+    outer_destroy(o);
 }
