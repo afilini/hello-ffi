@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::fmt;
 
@@ -54,6 +53,7 @@ pub trait Lang {
         structure: &Ident,
         field: &mut Field,
         is_opaque: bool,
+        is_simple: bool,
         impl_block: &mut ItemImpl,
     ) -> Result<(), Self::Error>;
 
@@ -61,6 +61,7 @@ pub trait Lang {
         structure: &Ident,
         field: &mut Field,
         is_opaque: bool,
+        is_simple: bool,
         impl_block: &mut ItemImpl,
     ) -> Result<(), Self::Error>;
 
@@ -116,27 +117,39 @@ pub trait Lang {
                     let parsed_attrs = field.attrs[pos]
                         .parse_args_with(parser)
                         .map_err(LangError::ExposeTraitAttrError)?;
-                    let parsed_attrs = parsed_attrs.into_iter().collect::<HashSet<_>>();
                     field.attrs.remove(pos);
 
                     let mut wrap_type = false;
-                    if parsed_attrs.contains(&ExposeStructOpts::Get) {
-                        wrap_type = true;
-                        Self::expose_getter(
-                            &structure.ident,
-                            &mut field,
-                            is_opaque,
-                            &mut impl_block,
-                        )?;
-                    }
-                    if parsed_attrs.contains(&ExposeStructOpts::Set) {
-                        wrap_type = true;
-                        Self::expose_setter(
-                            &structure.ident,
-                            &mut field,
-                            is_opaque,
-                            &mut impl_block,
-                        )?;
+                    for opt in parsed_attrs {
+                        match opt {
+                            ExposeStructOpts::Get { is_simple } => {
+                                if !is_simple {
+                                    wrap_type = true;
+                                }
+
+                                Self::expose_getter(
+                                    &structure.ident,
+                                    &mut field,
+                                    is_opaque,
+                                    is_simple,
+                                    &mut impl_block,
+                                )?;
+                            }
+                            ExposeStructOpts::Set { is_simple } => {
+                                if !is_simple {
+                                    wrap_type = true;
+                                }
+
+                                Self::expose_setter(
+                                    &structure.ident,
+                                    &mut field,
+                                    is_opaque,
+                                    is_simple,
+                                    &mut impl_block,
+                                )?;
+                            }
+                            _ => continue,
+                        }
                     }
 
                     if wrap_type {

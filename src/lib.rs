@@ -68,13 +68,15 @@ mod test_mod {
     struct Outer {
         #[expose_struct(get, set)]
         inner: Inner,
+        #[expose_struct(get_simple, set_simple)]
+        value: u32,
     }
 
     #[expose_impl]
     impl Outer {
         #[constructor]
-        fn new(inner: &Inner) -> Self {
-            Outer { inner }
+        fn new(inner: &Inner, value: u32) -> Self {
+            Outer { inner, value }
         }
         #[destructor]
         fn destroy(_s: Self) {}

@@ -378,6 +378,7 @@ impl Lang for C {
         structure: &Ident,
         field: &mut Field,
         is_opaque: bool,
+        is_simple: bool,
         impl_block: &mut ItemImpl,
     ) -> Result<(), Self::Error> {
         if !is_opaque {
@@ -387,10 +388,19 @@ impl Lang for C {
         let old_ty = &field.ty;
         let field_ident = field.ident.as_ref().expect("Missing field ident");
         let getter_name = format_ident!("get_{}", field_ident);
-        let getter: ImplItemMethod = parse_quote! {
-            #[getter]
-            fn #getter_name(&mut self) -> *mut #old_ty {
-                (&mut *self.#field_ident) as *mut #old_ty
+        let getter: ImplItemMethod = if is_simple {
+            parse_quote! {
+                #[getter]
+                fn #getter_name(&mut self) -> #old_ty {
+                    self.#field_ident.clone()
+                }
+            }
+        } else {
+            parse_quote! {
+                #[getter]
+                fn #getter_name(&mut self) -> *mut #old_ty {
+                    (&mut *self.#field_ident) as *mut #old_ty
+                }
             }
         };
         impl_block.items.push(getter.into());
@@ -402,6 +412,7 @@ impl Lang for C {
         structure: &Ident,
         field: &mut Field,
         is_opaque: bool,
+        is_simple: bool,
         impl_block: &mut ItemImpl,
     ) -> Result<(), Self::Error> {
         if !is_opaque {
@@ -411,10 +422,19 @@ impl Lang for C {
         let old_ty = &field.ty;
         let field_ident = field.ident.as_ref().expect("Missing field ident");
         let setter_name = format_ident!("set_{}", field_ident);
-        let setter: ImplItemMethod = parse_quote! {
-            #[setter]
-            fn #setter_name(&mut self, #field_ident: &#old_ty) {
-                self.#field_ident = Box::new(#field_ident);
+        let setter: ImplItemMethod = if is_simple {
+            parse_quote! {
+                #[setter]
+                fn #setter_name(&mut self, #field_ident: #old_ty) {
+                    self.#field_ident = #field_ident;
+                }
+            }
+        } else {
+            parse_quote! {
+                #[setter]
+                fn #setter_name(&mut self, #field_ident: &#old_ty) {
+                    self.#field_ident = Box::new(#field_ident);
+                }
             }
         };
         impl_block.items.push(setter.into());
