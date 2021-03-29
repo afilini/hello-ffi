@@ -369,13 +369,13 @@ impl Lang for Python {
         _is_opaque: bool,
         impl_block: &mut ItemImpl,
     ) -> Result<(), Self::Error> {
-        let old_ty = &field.ty;
+        let field_ty = &field.ty;
         let field_ident = field.ident.as_ref().expect("Missing field ident");
         let getter_name = format_ident!("get_{}", field_ident);
         let getter: ImplItemMethod = parse_quote! {
             #[getter]
-            fn #getter_name(&self, py: pyo3::Python) -> pyo3::Py<#old_ty> {
-                self.#field_ident.clone_ref(py)
+            fn #getter_name(&self) -> <#field_ty as crate::common::WrappedStructField>::Getter {
+                self.#field_ident.get()
             }
         };
         impl_block.items.push(getter.into());
@@ -389,14 +389,13 @@ impl Lang for Python {
         _is_opaque: bool,
         impl_block: &mut ItemImpl,
     ) -> Result<(), Self::Error> {
-        let old_ty = &field.ty;
+        let field_ty = &field.ty;
         let field_ident = field.ident.as_ref().expect("Missing field ident");
         let setter_name = format_ident!("set_{}", field_ident);
         let setter: ImplItemMethod = parse_quote! {
             #[setter]
-            fn #setter_name(&mut self, py: pyo3::Python, #field_ident: #old_ty) -> pyo3::PyResult<()> {
-                self.#field_ident = pyo3::Py::new(py, #field_ident)?;
-                Ok(())
+            fn #setter_name(&mut self, #field_ident: <#field_ty as crate::common::WrappedStructField>::Setter) {
+                self.#field_ident.set(#field_ident);
             }
         };
         impl_block.items.push(setter.into());
@@ -405,7 +404,7 @@ impl Lang for Python {
     }
 
     fn wrap_field_type(ty: Type) -> Result<Type, Self::Error> {
-        Ok(parse_quote!(pyo3::Py<#ty>))
+        Ok(parse_quote!(crate::common::GetterSetterWrapper<#ty>))
     }
 
     fn convert_input(ty: Type) -> Result<Input, Self::Error> {

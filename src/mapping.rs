@@ -119,6 +119,7 @@ mod python_mapping {
     use pyo3::type_object::{PyBorrowFlagLayout, PyTypeInfo};
 
     use super::*;
+    use crate::common::*;
 
     impl<T> MapFrom<T> for pyo3::Py<T>
     where
@@ -130,6 +131,16 @@ mod python_mapping {
                 Ok(pyo3::Py::new(py, owned)?)
             })
             .expect("Unable to allocate cell")
+        }
+    }
+
+    impl<T> MapFrom<T> for GetterSetterWrapper<T>
+    where
+        T: WrappedStructField,
+        <T as WrappedStructField>::Store: MapFrom<T>,
+    {
+        fn map_from(t: T) -> Self {
+            GetterSetterWrapper(MapFrom::map_from(t))
         }
     }
 }

@@ -397,13 +397,13 @@ impl Lang for C {
             return Ok(());
         }
 
-        let old_ty = &field.ty;
+        let field_ty = &field.ty;
         let field_ident = field.ident.as_ref().expect("Missing field ident");
         let getter_name = format_ident!("get_{}", field_ident);
         let getter: ImplItemMethod = parse_quote! {
             #[getter]
-            fn #getter_name(&self) -> *mut #old_ty {
-                self.#field_ident
+            fn #getter_name(&self) -> <#field_ty as crate::common::WrappedStructField>::Getter {
+                self.#field_ident.get()
             }
         };
         impl_block.items.push(getter.into());
@@ -421,14 +421,13 @@ impl Lang for C {
             return Ok(());
         }
 
-        let old_ty = &field.ty;
+        let field_ty = &field.ty;
         let field_ident = field.ident.as_ref().expect("Missing field ident");
         let setter_name = format_ident!("set_{}", field_ident);
         let setter: ImplItemMethod = parse_quote! {
             #[setter]
-            fn #setter_name(&mut self, #field_ident: &#old_ty) {
-                let _free = unsafe { Box::from_raw(self.#field_ident) };
-                self.#field_ident = #field_ident;
+            fn #setter_name(&mut self, #field_ident: <#field_ty as crate::common::WrappedStructField>::Setter) {
+                self.#field_ident.set(#field_ident);
             }
         };
         impl_block.items.push(setter.into());
@@ -436,8 +435,11 @@ impl Lang for C {
         Ok(())
     }
 
+    // let _free = unsafe { Box::from_raw(self.#field_ident) };
+    // self.#field_ident = #field_ident;
+
     fn wrap_field_type(ty: Type) -> Result<Type, Self::Error> {
-        Ok(parse_quote!(*mut #ty))
+        Ok(parse_quote!(crate::common::GetterSetterWrapper<#ty>))
     }
 
     fn convert_input(ty: Type) -> Result<Input, Self::Error> {
