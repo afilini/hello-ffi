@@ -65,6 +65,12 @@ mod c_mapping {
         }
     }
 
+    impl<T> MapFrom<T> for Box<T> {
+        fn map_from(t: T) -> Self {
+            Box::new(t)
+        }
+    }
+
     impl MapTo<*mut libc::c_char> for String {
         fn map_to(self) -> *mut libc::c_char {
             let cstring = std::ffi::CString::new(self).expect("Invalid outgoing string");

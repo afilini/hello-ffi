@@ -97,15 +97,13 @@ pub trait Lang {
         structure: &mut ItemStruct,
         is_opaque: bool,
         mod_path: &Vec<Ident>,
-    ) -> Result<(ItemImpl, Vec<Ident>), Self::Error> {
+    ) -> Result<ItemImpl, Self::Error> {
         let structure_ident = structure.ident.clone();
 
         let mut impl_block: ItemImpl = parse_quote! {
             impl #structure_ident {
             }
         };
-
-        let mut wrapped_fields = vec![];
 
         if let Fields::Named(FieldsNamed { named, .. }) = &mut structure.fields {
             for mut field in named {
@@ -146,7 +144,6 @@ pub trait Lang {
                         field.vis = parse_quote!( pub(crate) );
 
                         let field_ident = field.ident.as_ref().expect("Missing field ident");
-                        wrapped_fields.push(field_ident.clone());
                     }
                 }
             }
@@ -154,7 +151,7 @@ pub trait Lang {
 
         Self::expose_impl(&mut impl_block, mod_path)?;
 
-        Ok((impl_block, wrapped_fields))
+        Ok(impl_block)
     }
 }
 

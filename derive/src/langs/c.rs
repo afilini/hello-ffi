@@ -116,21 +116,8 @@ impl Lang for C {
         }
         structure.vis = parse_quote!(pub);
 
-        let (impl_block, wrapped_fields) =
-            Self::generate_getters_setters(structure, is_opaque, mod_path)?;
+        let impl_block = Self::generate_getters_setters(structure, is_opaque, mod_path)?;
         extra.push(impl_block.into());
-
-        let wrapped_fields = wrapped_fields
-            .into_iter()
-            .map(|field| quote! { let _free = unsafe { Box::from_raw(self.#field) }; });
-        let custom_destructor: ItemImpl = parse_quote! {
-            impl Drop for #ident {
-                fn drop(&mut self) {
-                    #(#wrapped_fields)*
-                }
-            }
-        };
-        extra.push(custom_destructor.into());
 
         Ok(ident)
     }
@@ -402,8 +389,8 @@ impl Lang for C {
         let getter_name = format_ident!("get_{}", field_ident);
         let getter: ImplItemMethod = parse_quote! {
             #[getter]
-            fn #getter_name(&self) -> *mut #old_ty {
-                self.#field_ident
+            fn #getter_name(&mut self) -> *mut #old_ty {
+                (&mut *self.#field_ident) as *mut #old_ty
             }
         };
         impl_block.items.push(getter.into());
@@ -427,8 +414,7 @@ impl Lang for C {
         let setter: ImplItemMethod = parse_quote! {
             #[setter]
             fn #setter_name(&mut self, #field_ident: &#old_ty) {
-                let _free = unsafe { Box::from_raw(self.#field_ident) };
-                self.#field_ident = #field_ident;
+                self.#field_ident = Box::new(#field_ident);
             }
         };
         impl_block.items.push(setter.into());
@@ -437,7 +423,7 @@ impl Lang for C {
     }
 
     fn wrap_field_type(ty: Type) -> Result<Type, Self::Error> {
-        Ok(parse_quote!(*mut #ty))
+        Ok(parse_quote!(Box<#ty>))
     }
 
     fn convert_input(ty: Type) -> Result<Input, Self::Error> {

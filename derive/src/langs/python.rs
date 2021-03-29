@@ -141,8 +141,7 @@ impl Lang for Python {
         };
         structure.attrs.push(attr);
 
-        let (impl_block, wrapped_fields) =
-            Self::generate_getters_setters(structure, true, mod_path)?;
+        let impl_block = Self::generate_getters_setters(structure, true, mod_path)?;
         extra.push(impl_block.into());
 
         Ok(ident)
