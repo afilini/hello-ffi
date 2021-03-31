@@ -1,6 +1,12 @@
+use std::ops::{Deref, DerefMut};
+
 use pyo3::prelude::*;
+use pyo3::pyclass::PyClass;
+use pyo3::pyclass_init::PyClassInitializer;
+use pyo3::type_object::{PyBorrowFlagLayout, PyTypeInfo};
 
 use crate::common::*;
+use crate::mapping::*;
 
 pub struct PyCb<'source>(&'source pyo3::PyAny);
 
@@ -40,15 +46,17 @@ impl<T> std::ops::DerefMut for MyVec<T> {
 }
 // TODO: impl IntoIterator, FromIterator
 
-// #[pyo3::prelude::pyproto]
-// impl<T> pyo3::class::PyObjectProtocol for T
-// where
-//     T: ToString
-// {
-//     fn __str__(&self) -> String {
-//         self.to_string()
-//     }
-// }
+impl<T: PyClass> AccessContainer for pyo3::Py<T> {
+    type Content = T;
+
+    fn access_container<R, F: Fn(&Self::Content) -> R>(&self, f: F) -> R {
+        Python::with_gil(|py| { f(self.as_ref(py).borrow().deref()) })
+    }
+
+    fn access_container_mut<R, F: Fn(&mut Self::Content) -> R>(&mut self, f: F) -> R {
+        Python::with_gil(|py| { f(self.as_ref(py).borrow_mut().deref_mut()) })
+    }
+}
 
 #[macro_export]
 macro_rules! impl_py_error {
@@ -66,4 +74,23 @@ pub trait IntoTraitStruct: Sized {
     type Target;
 
     fn into_trait_struct(self) -> Self::Target;
+}
+
+impl<T> WrappedStructField for T
+where
+    T: ExposedStruct + pyo3::PyTypeInfo + Into<PyClassInitializer<T>> + PyClass,
+    <T as PyTypeInfo>::BaseLayout: PyBorrowFlagLayout<<T as PyTypeInfo>::BaseType>,
+{
+    type Store = Py<T>;
+
+    type Getter = Py<T>;
+    type Setter = T;
+
+    fn wrap_get(s: &mut Self::Store) -> Self::Getter {
+        Python::with_gil(|py| -> Py<T> { s.clone_ref(py) })
+    }
+
+    fn wrap_set(s: Self::Setter) -> Self::Store {
+        MapFrom::map_from(s)
+    }
 }

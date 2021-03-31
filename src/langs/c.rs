@@ -1,4 +1,5 @@
-use crate::mapping::MapFrom;
+use crate::mapping::*;
+use crate::common::*;
 
 pub struct Destroy<T>(*mut T);
 
@@ -50,4 +51,31 @@ pub fn take_ptr<I>(this: *mut libc::c_void) -> Box<I> {
 pub struct Arr<T> {
     pub ptr: *const T,
     pub len: usize,
+}
+
+impl<T> AccessContainer for Box<T> {
+    type Content = T;
+
+    fn access_container<R, F: Fn(&Self::Content) -> R>(&self, f: F) -> R {
+        f(self)
+    }
+
+    fn access_container_mut<R, F: Fn(&mut Self::Content) -> R>(&mut self, f: F) -> R {
+        f(self)
+    }
+}
+
+impl<T: ExposedStruct> WrappedStructField for T {
+    type Store = Box<T>;
+
+    type Getter = *mut T;
+    type Setter = T;
+
+    fn wrap_get(s: &mut Self::Store) -> Self::Getter {
+        &mut **s as *mut T
+    }
+
+    fn wrap_set(s: Self::Setter) -> Self::Store {
+        Box::new(s)
+    }
 }

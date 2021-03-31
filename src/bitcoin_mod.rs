@@ -2,15 +2,15 @@ use super::*;
 
 #[expose_mod]
 mod bitcoin {
-    use super::BitcoinError;
     use std::ops::Deref;
 
-    #[expose_struct("opaque")]
+    use super::BitcoinError;
+
+    #[expose_struct("opaque", to_string)]
     pub struct Script {
         inner: bdk::bitcoin::Script,
     }
     wrap_struct!(Script, bdk::bitcoin::Script);
-
     #[expose_impl]
     impl Script {
         #[constructor]
@@ -35,9 +35,12 @@ mod bitcoin {
         fn asm(&self) -> String {
             self.deref().asm()
         }
+        fn to_string(&self) -> String {
+            self.asm()
+        }
     }
 
-    #[expose_struct("opaque")]
+    #[expose_struct("opaque", to_string)]
     pub struct Network {
         inner: bdk::bitcoin::Network,
     }
@@ -59,219 +62,247 @@ mod bitcoin {
         fn testnet() -> Self {
             bdk::bitcoin::Network::Testnet.into()
         }
+        fn regtest() -> Self {
+            bdk::bitcoin::Network::Regtest.into()
+        }
+        fn signet() -> Self {
+            bdk::bitcoin::Network::Signet.into()
+        }
+        fn is_bitcoin(&self) -> bool {
+            self.inner == bdk::bitcoin::Network::Bitcoin
+        }
+        fn is_testnet(&self) -> bool {
+            self.inner == bdk::bitcoin::Network::Testnet
+        }
+        fn is_regtest(&self) -> bool {
+            self.inner == bdk::bitcoin::Network::Regtest
+        }
+        fn is_signet(&self) -> bool {
+            self.inner == bdk::bitcoin::Network::Signet
+        }
 
         fn to_string(&self) -> String {
             self.deref().to_string()
         }
     }
 
-    #[expose_struct("opaque")]
+    #[expose_struct(to_string)]
     pub struct Address {
-        inner: bdk::bitcoin::Address,
+        #[expose_struct(get)] // TODO: add the setter manually to check if the script is valid
+        script: Script,
+        #[expose_struct(get, set)]
+        network: Network,
     }
-    wrap_struct!(Address, bdk::bitcoin::Address);
     #[expose_impl]
     impl Address {
         fn from_script(script: &Script, network: &Network) -> Option<Self> {
+            // check if the script can be turned into an address
             bdk::bitcoin::Address::from_script(script.deref(), network.deref().clone())
-                .map(Into::into)
+                .map(|_| Address {
+                    script: MapFrom::map_from(script), network: MapFrom::map_from(network)
+                })
         }
 
         #[constructor]
         fn from_string(s: String) -> Result<Self, BitcoinError> {
             use std::str::FromStr;
+            use crate::common::IntoWrapped;
 
-            Ok(bdk::bitcoin::Address::from_str(&s)?.into())
+            let address = bdk::bitcoin::Address::from_str(&s)?;
+            Ok(Address {
+                script: MapFrom::map_from(address.script_pubkey().into_wrapped()),
+                network: MapFrom::map_from(address.network.into_wrapped()),
+            })
         }
         #[destructor]
         fn destroy(_s: Self) {}
 
         fn to_string(&self) -> String {
-            self.deref().to_string()
+            self.as_native().to_string()
         }
+    }
+    impl Address {
+        fn as_native(&self) -> bdk::bitcoin::Address {
+            use crate::common::AccessContainer;
 
-        #[getter]
-        fn get_script(&self) -> Script {
-            self.script_pubkey().into()
-        }
-
-        fn network(&self) -> Network {
-            self.inner.network.into()
+            let script = self.script.access_container(|s| s.clone());
+            let network = self.network.access_container(|n| n.clone());
+            bdk::bitcoin::Address::from_script(&script, *network).expect("Invalid Script")
         }
     }
 
-    pub use transaction::*;
-    #[expose_mod]
-    mod transaction {
-        use super::*;
-        use std::ops::Deref;
+    // pub use transaction::*;
+    // #[expose_mod]
+    // mod transaction {
+    //     use super::*;
+    //     use std::ops::Deref;
 
-        #[expose_struct("opaque")]
-        pub struct OutPoint {
-            inner: bdk::bitcoin::OutPoint,
-        }
-        wrap_struct!(OutPoint, bdk::bitcoin::OutPoint);
-        #[expose_impl]
-        impl OutPoint {
-            #[constructor]
-            fn from_string(s: String) -> Result<Self, BitcoinError> {
-                use std::str::FromStr;
+    //     #[expose_struct("opaque")]
+    //     pub struct OutPoint {
+    //         inner: bdk::bitcoin::OutPoint,
+    //     }
+    //     wrap_struct!(OutPoint, bdk::bitcoin::OutPoint);
+    //     #[expose_impl]
+    //     impl OutPoint {
+    //         #[constructor]
+    //         fn from_string(s: String) -> Result<Self, BitcoinError> {
+    //             use std::str::FromStr;
 
-                Ok(bdk::bitcoin::OutPoint::from_str(&s)?.into())
-            }
-            #[destructor]
-            fn destroy(_s: Self) {}
+    //             Ok(bdk::bitcoin::OutPoint::from_str(&s)?.into())
+    //         }
+    //         #[destructor]
+    //         fn destroy(_s: Self) {}
 
-            fn new(txid: [u8; 32], vout: u32) -> Self {
-                bdk::bitcoin::OutPoint {
-                    txid: bdk::bitcoin::Txid::from_hash(bdk::bitcoin::hashes::Hash::from_inner(
-                        txid,
-                    )),
-                    vout,
-                }
-                .into()
-            }
-            #[getter]
-            fn get_txid(&self) -> &[u8] {
-                &self.txid
-            }
-            #[getter]
-            fn get_vout(&self) -> u32 {
-                self.vout
-            }
-            #[setter]
-            fn set_txid(&mut self, txid: [u8; 32]) {
-                self.txid =
-                    bdk::bitcoin::Txid::from_hash(bdk::bitcoin::hashes::Hash::from_inner(txid));
-            }
-            #[setter]
-            fn set_vout(&mut self, vout: u32) {
-                self.vout = vout;
-            }
+    //         fn new(txid: [u8; 32], vout: u32) -> Self {
+    //             bdk::bitcoin::OutPoint {
+    //                 txid: bdk::bitcoin::Txid::from_hash(bdk::bitcoin::hashes::Hash::from_inner(
+    //                     txid,
+    //                 )),
+    //                 vout,
+    //             }
+    //             .into()
+    //         }
+    //         #[getter]
+    //         fn get_txid(&self) -> &[u8] {
+    //             &self.txid
+    //         }
+    //         #[getter]
+    //         fn get_vout(&self) -> u32 {
+    //             self.vout
+    //         }
+    //         #[setter]
+    //         fn set_txid(&mut self, txid: [u8; 32]) {
+    //             self.txid =
+    //                 bdk::bitcoin::Txid::from_hash(bdk::bitcoin::hashes::Hash::from_inner(txid));
+    //         }
+    //         #[setter]
+    //         fn set_vout(&mut self, vout: u32) {
+    //             self.vout = vout;
+    //         }
 
-            fn to_string(&self) -> String {
-                self.deref().to_string()
-            }
-        }
+    //         fn to_string(&self) -> String {
+    //             self.deref().to_string()
+    //         }
+    //     }
 
-        #[expose_struct("opaque")]
-        pub struct TxOut {
-            inner: bdk::bitcoin::TxOut,
-        }
-        wrap_struct!(TxOut, bdk::bitcoin::TxOut);
-        #[expose_impl]
-        impl TxOut {
-            #[constructor]
-            fn new(script_pubkey: &Script, value: u64) -> Self {
-                bdk::bitcoin::TxOut {
-                    script_pubkey: script_pubkey.deref().clone().into(),
-                    value,
-                }
-                .into()
-            }
-            #[destructor]
-            fn destroy(_s: Self) {}
+    //     #[expose_struct("opaque")]
+    //     pub struct TxOut {
+    //         inner: bdk::bitcoin::TxOut,
+    //     }
+    //     wrap_struct!(TxOut, bdk::bitcoin::TxOut);
+    //     #[expose_impl]
+    //     impl TxOut {
+    //         #[constructor]
+    //         fn new(script_pubkey: &Script, value: u64) -> Self {
+    //             bdk::bitcoin::TxOut {
+    //                 script_pubkey: script_pubkey.deref().clone().into(),
+    //                 value,
+    //             }
+    //             .into()
+    //         }
+    //         #[destructor]
+    //         fn destroy(_s: Self) {}
 
-            #[getter]
-            fn get_script_pubkey(&self) -> Script {
-                self.script_pubkey.clone().into()
-            }
-            #[getter]
-            fn get_value(&self) -> u64 {
-                self.value
-            }
-            #[setter]
-            fn set_script_pubkey(&mut self, script_pubkey: &Script) {
-                self.script_pubkey = script_pubkey.deref().clone().into();
-            }
-            #[setter]
-            fn set_value(&mut self, value: u64) {
-                self.value = value;
-            }
-        }
+    //         #[getter]
+    //         fn get_script_pubkey(&self) -> Script {
+    //             self.script_pubkey.clone().into()
+    //         }
+    //         #[getter]
+    //         fn get_value(&self) -> u64 {
+    //             self.value
+    //         }
+    //         #[setter]
+    //         fn set_script_pubkey(&mut self, script_pubkey: &Script) {
+    //             self.script_pubkey = script_pubkey.deref().clone().into();
+    //         }
+    //         #[setter]
+    //         fn set_value(&mut self, value: u64) {
+    //             self.value = value;
+    //         }
+    //     }
 
-        #[expose_struct("opaque")]
-        pub struct TxIn {
-            #[expose_struct(get, set)]
-            previous_output: OutPoint,
-            #[expose_struct(get, set)]
-            script_sig: Script,
-            sequence: u32,
-            witness: Vec<Vec<u8>>,
-        }
-        // wrap_struct!(TxIn, bdk::bitcoin::TxIn);
-        #[expose_impl]
-        impl TxIn {
-            #[constructor]
-            fn new(
-                previous_output: &OutPoint,
-                script_sig: &Script,
-                sequence: u32,
-                witness: Vec<Vec<u8>>,
-            ) -> Self {
-                let previous_output: OutPoint = previous_output.deref().clone().into();
-                #[cfg(feature = "python")]
-                let previous_output = pyo3::Py::new(py, previous_output).expect("Unable to allocate cell");
+    //     #[expose_struct("opaque")]
+    //     pub struct TxIn {
+    //         #[expose_struct(get, set)]
+    //         previous_output: OutPoint,
+    //         #[expose_struct(get, set)]
+    //         script_sig: Script,
+    //         sequence: u32,
+    //         witness: Vec<Vec<u8>>,
+    //     }
+    //     // wrap_struct!(TxIn, bdk::bitcoin::TxIn);
+    //     #[expose_impl]
+    //     impl TxIn {
+    //         #[constructor]
+    //         fn new(
+    //             previous_output: &OutPoint,
+    //             script_sig: &Script,
+    //             sequence: u32,
+    //             witness: Vec<Vec<u8>>,
+    //         ) -> Self {
+    //             let previous_output: OutPoint = previous_output.deref().clone().into();
+    //             #[cfg(feature = "python")]
+    //             let previous_output = pyo3::Py::new(py, previous_output).expect("Unable to allocate cell");
 
-                let script_sig: Script = script_sig.deref().clone().into();
-                #[cfg(feature = "python")]
-                let script_sig = pyo3::Py::new(py, script_sig).expect("Unable to allocate cell");
+    //             let script_sig: Script = script_sig.deref().clone().into();
+    //             #[cfg(feature = "python")]
+    //             let script_sig = pyo3::Py::new(py, script_sig).expect("Unable to allocate cell");
 
-                TxIn {
-                    previous_output,
-                    script_sig,
-                    sequence,
-                    witness,
-                }
-            }
-            #[destructor]
-            fn destroy(_s: Self) {}
+    //             TxIn {
+    //                 previous_output,
+    //                 script_sig,
+    //                 sequence,
+    //                 witness,
+    //             }
+    //         }
+    //         #[destructor]
+    //         fn destroy(_s: Self) {}
 
-            #[getter]
-            fn get_sequence(&self) -> u32 {
-                self.sequence
-            }
-            #[setter]
-            fn set_sequence(&mut self, sequence: u32) {
-                self.sequence = sequence
-            }
-        }
+    //         #[getter]
+    //         fn get_sequence(&self) -> u32 {
+    //             self.sequence
+    //         }
+    //         #[setter]
+    //         fn set_sequence(&mut self, sequence: u32) {
+    //             self.sequence = sequence
+    //         }
+    //     }
 
-        // #[expose_struct("opaque")]
-        // pub struct Transaction {
-        //     inner: bdk::bitcoin::Transaction,
-        // }
-        // wrap_struct!(Transaction, bdk::bitcoin::Transaction);
-        // #[expose_impl]
-        // impl Transaction {
-        //     #[constructor]
-        //     fn new(version: i32, lock_time: u32, input: Vec<&TxIn>, output: Vec<&TxOut>) -> Self {
-        //         bdk::bitcoin::Transaction {
-        //             version,
-        //             lock_time,
-        //             input: input.into_iter().map(|i| i.deref().clone()).collect(),
-        //             output: output.into_iter().map(|o| o.deref().clone()).collect(),
-        //         }
-        //         .into()
-        //     }
-        //     #[destructor]
-        //     fn destroy(_s: Self) {}
+    //     // #[expose_struct("opaque")]
+    //     // pub struct Transaction {
+    //     //     inner: bdk::bitcoin::Transaction,
+    //     // }
+    //     // wrap_struct!(Transaction, bdk::bitcoin::Transaction);
+    //     // #[expose_impl]
+    //     // impl Transaction {
+    //     //     #[constructor]
+    //     //     fn new(version: i32, lock_time: u32, input: Vec<&TxIn>, output: Vec<&TxOut>) -> Self {
+    //     //         bdk::bitcoin::Transaction {
+    //     //             version,
+    //     //             lock_time,
+    //     //             input: input.into_iter().map(|i| i.deref().clone()).collect(),
+    //     //             output: output.into_iter().map(|o| o.deref().clone()).collect(),
+    //     //         }
+    //     //         .into()
+    //     //     }
+    //     //     #[destructor]
+    //     //     fn destroy(_s: Self) {}
 
-        //     fn from_hex(hex: String) -> Result<Self, BitcoinError> {
-        //         use bdk::bitcoin::consensus::deserialize;
-        //         use bdk::bitcoin::hashes::hex::FromHex;
+    //     //     fn from_hex(hex: String) -> Result<Self, BitcoinError> {
+    //     //         use bdk::bitcoin::consensus::deserialize;
+    //     //         use bdk::bitcoin::hashes::hex::FromHex;
 
-        //         let bytes = Vec::<u8>::from_hex(&hex)?;
-        //         let deserialized: bdk::bitcoin::Transaction = deserialize(&bytes)?;
-        //         Ok(deserialized.into())
-        //     }
-        //     fn to_hex(&self) -> String {
-        //         use bdk::bitcoin::consensus::encode::serialize_hex;
+    //     //         let bytes = Vec::<u8>::from_hex(&hex)?;
+    //     //         let deserialized: bdk::bitcoin::Transaction = deserialize(&bytes)?;
+    //     //         Ok(deserialized.into())
+    //     //     }
+    //     //     fn to_hex(&self) -> String {
+    //     //         use bdk::bitcoin::consensus::encode::serialize_hex;
 
-        //         serialize_hex(self.deref())
-        //     }
-        // }
-    }
+    //     //         serialize_hex(self.deref())
+    //     //     }
+    //     // }
+    // }
 }
 
 #[derive(Debug)]

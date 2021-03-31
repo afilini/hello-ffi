@@ -1,30 +1,60 @@
-pub(crate) mod sealed {
-    pub trait Sealed {}
+pub trait ExposedStruct {}
+
+pub trait IntoWrapped {
+    type Target;
+    fn into_wrapped(self) -> Self::Target;
 }
 
-pub trait WrappedStructField: Sized {
+pub trait WrappedStructField {
     type Store;
 
     type Getter;
     type Setter;
 
-    // TODO: add default impl if Self is Clone
     fn wrap_get(s: &mut Self::Store) -> Self::Getter;
 
     fn wrap_set(s: Self::Setter) -> Self::Store;
 }
 
-pub struct GetterSetterWrapper<T: WrappedStructField>(pub <T as WrappedStructField>::Store);
+pub trait AccessContainer {
+    type Content;
 
-impl<T: WrappedStructField> GetterSetterWrapper<T> {
-    pub fn get(&mut self) -> <T as WrappedStructField>::Getter {
-        T::wrap_get(&mut self.0)
-    }
+    /// Access a container and pass a reference to its content to the closure
+    fn access_container<R, F: Fn(&Self::Content) -> R>(&self, f: F) -> R;
 
-    pub fn set(&mut self, value: <T as WrappedStructField>::Setter) {
-        self.0 = T::wrap_set(value);
+    /// Same as `access_container()` but mutably
+    fn access_container_mut<R, F: Fn(&mut Self::Content) -> R>(&mut self, f: F) -> R;
+}
+
+macro_rules! impl_native_wrapper_struct_field {
+    ($ty:ty) => {
+        impl WrappedStructField for $ty {
+            type Store = $ty;
+
+            type Getter = $ty;
+            type Setter = $ty;
+
+            #[inline]
+            fn wrap_get(s: &mut Self::Store) -> Self::Getter {
+                *s
+            }
+
+            #[inline]
+            fn wrap_set(s: Self::Setter) -> Self::Store {
+                s
+            }
+        }
     }
 }
+impl_native_wrapper_struct_field!(i8);
+impl_native_wrapper_struct_field!(u8);
+impl_native_wrapper_struct_field!(i16);
+impl_native_wrapper_struct_field!(u16);
+impl_native_wrapper_struct_field!(i32);
+impl_native_wrapper_struct_field!(u32);
+impl_native_wrapper_struct_field!(i64);
+impl_native_wrapper_struct_field!(u64);
+
 #[macro_export]
 macro_rules! wrap_struct {
     ($ident:ident, $ty:ty) => {
@@ -33,7 +63,13 @@ macro_rules! wrap_struct {
                 $ident { inner }
             }
         }
-        impl crate::common::sealed::Sealed for $ident {}
+        impl crate::common::IntoWrapped for $ty {
+            type Target = $ident;
+
+            fn into_wrapped(self) -> Self::Target {
+                self.into()
+            }
+        }
         impl std::ops::Deref for $ident {
             type Target = $ty;
 
@@ -58,55 +94,4 @@ macro_rules! wrap_struct {
             }
         }
     };
-}
-
-#[cfg(feature = "c")]
-mod c_common {
-    use super::*;
-
-    impl<T> WrappedStructField for T {
-        type Store = Box<T>;
-
-        type Getter = *mut T;
-        type Setter = T;
-
-        fn wrap_get(s: &mut Self::Store) -> Self::Getter {
-            &*s as *mut T;
-        }
-
-        fn wrap_set(s: Self::Setter) -> Self::Store {
-            Box::new(s)
-        }
-    }
-}
-
-#[cfg(feature = "python")]
-mod python_common {
-    use pyo3::prelude::*;
-    use pyo3::pyclass::PyClass;
-    use pyo3::pyclass_init::PyClassInitializer;
-    use pyo3::type_object::{PyBorrowFlagLayout, PyTypeInfo};
-
-    use super::*;
-
-    impl<T: PyClass> WrappedStructField for T
-    where
-        T: pyo3::PyTypeInfo + Into<PyClassInitializer<T>> + PyClass,
-        <T as PyTypeInfo>::BaseLayout: PyBorrowFlagLayout<<T as PyTypeInfo>::BaseType>,
-    {
-        type Store = Py<T>;
-
-        type Getter = Py<T>;
-        type Setter = T;
-
-        fn wrap_get(s: &mut Self::Store) -> Self::Getter {
-            use pyo3::prelude::*;
-
-            Python::with_gil(|py| -> Py<T> { s.clone_ref(py) })
-        }
-
-        fn wrap_set(s: Self::Setter) -> Self::Store {
-            crate::mapping::MapFrom::map_from(s)
-        }
-    }
 }

@@ -74,9 +74,15 @@ fn analyze_module(module: &mut ItemMod, mut path: Vec<Ident>, extra: &mut Vec<It
                     structure.attrs.remove(pos);
                     check_struct(structure);
 
-                    sub_items.push(ModuleItem::Structure(
-                        CurrentLang::expose_struct(structure, opts, &path, extra).unwrap(),
-                    ));
+                    let struct_ident = CurrentLang::expose_struct(structure, opts, &path, extra).unwrap();
+
+                    // Implement `ExposedStruct` automatically
+                    let impl_exposed_struct: ItemImpl = parse_quote! {
+                        impl crate::common::ExposedStruct for #struct_ident {}
+                    };
+                    extra.push(impl_exposed_struct.into());
+
+                    sub_items.push(ModuleItem::Structure(struct_ident));
                 }
             }
             Item::Impl(implementation) => {

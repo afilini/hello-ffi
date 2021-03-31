@@ -7,6 +7,11 @@ pub enum ExposeStructOpts {
     Get,
     Set,
 
+    /// The struct implements `ToString`
+    ToString,
+    /// The struct implements `Debug`
+    ToDebug,
+
     #[cfg(feature = "python")]
     Subclass,
 }
@@ -23,6 +28,8 @@ impl Parse for ExposeStructOpts {
             match path.get_ident() {
                 Some(s) if s == "get" => Ok(ExposeStructOpts::Get),
                 Some(s) if s == "set" => Ok(ExposeStructOpts::Set),
+                Some(s) if s == "to_string" => Ok(ExposeStructOpts::ToString),
+                Some(s) if s == "to_debug" => Ok(ExposeStructOpts::ToDebug),
                 _ => Err(syn::Error::new(
                     input.span(),
                     "expected one of `get` or `set`",

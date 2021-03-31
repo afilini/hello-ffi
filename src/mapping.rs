@@ -50,6 +50,12 @@ mod c_mapping {
         }
     }
 
+    impl<T: Clone> MapFrom<&T> for T {
+        fn map_from(t: &T) -> Self {
+            t.clone()
+        }
+    }
+
     impl MapFrom<*const u8> for [u8; 32] {
         fn map_from(ptr: *const u8) -> Self {
             use std::convert::TryInto;
@@ -62,6 +68,18 @@ mod c_mapping {
     impl<T> MapFrom<T> for *mut T {
         fn map_from(t: T) -> Self {
             Box::into_raw(Box::new(t))
+        }
+    }
+
+    impl<T> MapFrom<T> for Box<T> {
+        fn map_from(t: T) -> Self {
+            Box::new(t)
+        }
+    }
+
+    impl<T: Clone> MapFrom<&T> for Box<T> {
+        fn map_from(t: &T) -> Self {
+            Box::new(t.clone())
         }
     }
 
@@ -134,13 +152,15 @@ mod python_mapping {
         }
     }
 
-    impl<T> MapFrom<T> for GetterSetterWrapper<T>
+    impl<T> MapFrom<&T> for pyo3::Py<T>
     where
-        T: WrappedStructField,
-        <T as WrappedStructField>::Store: MapFrom<T>,
+        T: pyo3::PyTypeInfo + Into<PyClassInitializer<T>> + PyClass + Clone,
+        <T as PyTypeInfo>::BaseLayout: PyBorrowFlagLayout<<T as PyTypeInfo>::BaseType>,
+        pyo3::Py<T>: MapFrom<T>,
     {
-        fn map_from(t: T) -> Self {
-            GetterSetterWrapper(MapFrom::map_from(t))
+        fn map_from(reference: &T) -> Self {
+            let owned = reference.clone();
+            MapFrom::map_from(owned)
         }
     }
 }

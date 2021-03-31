@@ -130,20 +130,40 @@ impl Lang for Python {
         extra: &mut Vec<Item>,
     ) -> Result<Ident, Self::Error> {
         let ident = structure.ident.clone();
-        let attr = if opts
-            .iter()
-            .find(|o| **o == ExposeStructOpts::Subclass)
-            .is_some()
-        {
+        let opts = opts.into_iter().collect::<HashSet<_>>();
+        let attr = if opts.contains(&ExposeStructOpts::Subclass) {
             parse_quote!( #[pyo3::prelude::pyclass(subclass)] )
         } else {
             parse_quote!( #[pyo3::prelude::pyclass] )
         };
         structure.attrs.push(attr);
 
-        let (impl_block, wrapped_fields) =
+        let impl_block =
             Self::generate_getters_setters(structure, true, mod_path)?;
         extra.push(impl_block.into());
+
+        if opts.contains(&ExposeStructOpts::ToString) {
+            let impl_block: ItemImpl = parse_quote! {
+                #[pyo3::prelude::pyproto]
+                impl pyo3::class::PyObjectProtocol for #ident {
+                    fn __str__(&self) -> String {
+                        self.to_string()
+                    }
+                }
+            };
+            extra.push(impl_block.into());
+        }
+        if opts.contains(&ExposeStructOpts::ToDebug) {
+            let impl_block: ItemImpl = parse_quote! {
+                #[pyo3::prelude::pyproto]
+                impl pyo3::class::PyObjectProtocol for #ident {
+                    fn __repr__(&self) -> String {
+                        format!("{:?}", self)
+                    }
+                }
+            };
+            extra.push(impl_block.into());
+        }
 
         Ok(ident)
     }
@@ -363,50 +383,6 @@ impl Lang for Python {
         Ok(trait_struct_ident)
     }
 
-    fn expose_getter(
-        structure: &Ident,
-        field: &mut Field,
-        _is_opaque: bool,
-        impl_block: &mut ItemImpl,
-    ) -> Result<(), Self::Error> {
-        let field_ty = &field.ty;
-        let field_ident = field.ident.as_ref().expect("Missing field ident");
-        let getter_name = format_ident!("get_{}", field_ident);
-        let getter: ImplItemMethod = parse_quote! {
-            #[getter]
-            fn #getter_name(&self) -> <#field_ty as crate::common::WrappedStructField>::Getter {
-                self.#field_ident.get()
-            }
-        };
-        impl_block.items.push(getter.into());
-
-        Ok(())
-    }
-
-    fn expose_setter(
-        structure: &Ident,
-        field: &mut Field,
-        _is_opaque: bool,
-        impl_block: &mut ItemImpl,
-    ) -> Result<(), Self::Error> {
-        let field_ty = &field.ty;
-        let field_ident = field.ident.as_ref().expect("Missing field ident");
-        let setter_name = format_ident!("set_{}", field_ident);
-        let setter: ImplItemMethod = parse_quote! {
-            #[setter]
-            fn #setter_name(&mut self, #field_ident: <#field_ty as crate::common::WrappedStructField>::Setter) {
-                self.#field_ident.set(#field_ident);
-            }
-        };
-        impl_block.items.push(setter.into());
-
-        Ok(())
-    }
-
-    fn wrap_field_type(ty: Type) -> Result<Type, Self::Error> {
-        Ok(parse_quote!(crate::common::GetterSetterWrapper<#ty>))
-    }
-
     fn convert_input(ty: Type) -> Result<Input, Self::Error> {
         // Take our opaque types as PyRef/PyRefMut instead of normal refs
         for t in &our_opaque_types!() {
@@ -437,30 +413,6 @@ impl Lang for Python {
                 }
                 _ => continue,
             }
-        }
-
-        match ty {
-            Type::Reference(TypeReference { ref elem, .. })
-                if elem.as_ref() == &parse_quote!(Inner) =>
-            {
-                let elem = elem.clone();
-
-                return Ok(Input::new_custom(
-                    parse_quote!(pyo3::Py<#elem>),
-                    vec![ty.clone()],
-                    move |_, ident| {
-                        let ts = quote! {
-                            {
-                                // TODO: handle errors
-                                let #ident: #elem = #ident.clone();
-                                MapFrom::map_from(#ident)
-                            }
-                        };
-                        ts.into()
-                    },
-                ));
-            }
-            _ => {}
         }
 
         if let Type::BareFn(ref bare_fn) = ty {

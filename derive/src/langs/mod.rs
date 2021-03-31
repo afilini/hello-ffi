@@ -4,13 +4,14 @@ use std::fmt;
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
+use quote::format_ident;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
 use syn::{
     parse_quote, Field, Fields, FieldsNamed, FnArg, Ident, Item, ItemFn, ItemImpl, ItemMod,
     ItemStruct, ItemTrait, Lit, LitStr, ParenthesizedGenericArguments, Pat, PatIdent, PatType,
-    Path, PathArguments, ReturnType, Token, Type,
+    Path, PathArguments, ReturnType, Token, Type, ImplItemMethod
 };
 
 use crate::types::*;
@@ -50,27 +51,70 @@ pub trait Lang {
         extra: &mut Vec<Item>,
     ) -> Result<Ident, Self::Error>;
 
+    fn convert_input(ty: Type) -> Result<Input, Self::Error>;
+
+    fn convert_output(output: Type) -> Result<Output, Self::Error>;
+
+    // By default links directly to the `WrappedStructField` trait, but it might bave to be
+    // overridden on some languages (like C)
+    //
+    // When overridden this must match the various implementations of WrappedStructField
+    fn convert_getter_setter_ty(ty: Type) -> Result<(Type, Type), Self::Error> {
+        Ok((parse_quote!(<#ty as crate::common::WrappedStructField>::Getter), parse_quote!(<#ty as crate::common::WrappedStructField>::Setter)))
+    }
+
     fn expose_getter(
         structure: &Ident,
         field: &mut Field,
         is_opaque: bool,
         impl_block: &mut ItemImpl,
-    ) -> Result<(), Self::Error>;
+    ) -> Result<(), Self::Error> {
+        if !is_opaque {
+            return Ok(());
+        }
+
+        let field_ty = &field.ty;
+        let getter_ty = Self::convert_getter_setter_ty(field.ty.clone())?.0;
+        let field_ident = field.ident.as_ref().expect("Missing field ident");
+        let getter_name = format_ident!("get_{}", field_ident);
+        let getter: ImplItemMethod = parse_quote! {
+            #[getter]
+            fn #getter_name(&mut self) -> #getter_ty {
+                use crate::common::WrappedStructField;
+                #field_ty::wrap_get(&mut self.#field_ident)
+            }
+        };
+        impl_block.items.push(getter.into());
+
+        Ok(())
+    }
 
     fn expose_setter(
         structure: &Ident,
         field: &mut Field,
         is_opaque: bool,
         impl_block: &mut ItemImpl,
-    ) -> Result<(), Self::Error>;
+    ) -> Result<(), Self::Error> {
+        if !is_opaque {
+            return Ok(());
+        }
 
-    fn wrap_field_type(ty: Type) -> Result<Type, Self::Error>;
+        let field_ty = &field.ty;
+        let setter_ty = Self::convert_getter_setter_ty(field.ty.clone())?.1;
+        let field_ident = field.ident.as_ref().expect("Missing field ident");
+        let setter_name = format_ident!("set_{}", field_ident);
+        let setter: ImplItemMethod = parse_quote! {
+            #[setter]
+            fn #setter_name(&mut self, #field_ident: #setter_ty) {
+                use crate::common::WrappedStructField;
+                self.#field_ident = #field_ty::wrap_set(#field_ident);
+            }
+        };
+        impl_block.items.push(setter.into());
 
-    fn convert_input(ty: Type) -> Result<Input, Self::Error>;
+        Ok(())
+    }
 
-    fn convert_output(output: Type) -> Result<Output, Self::Error>;
-
-    // provided methods
     fn convert_fn_args<I: IntoIterator<Item = FnArg>>(
         args: I,
     ) -> Result<(Punctuated<FnArg, Comma>, TokenStream2), Self::Error> {
@@ -97,15 +141,13 @@ pub trait Lang {
         structure: &mut ItemStruct,
         is_opaque: bool,
         mod_path: &Vec<Ident>,
-    ) -> Result<(ItemImpl, Vec<Ident>), Self::Error> {
+    ) -> Result<ItemImpl, Self::Error> {
         let structure_ident = structure.ident.clone();
 
         let mut impl_block: ItemImpl = parse_quote! {
             impl #structure_ident {
             }
         };
-
-        let mut wrapped_fields = vec![];
 
         if let Fields::Named(FieldsNamed { named, .. }) = &mut structure.fields {
             for mut field in named {
@@ -142,11 +184,12 @@ pub trait Lang {
                     }
 
                     if wrap_type {
-                        field.ty = Self::wrap_field_type(field.ty.clone())?;
+                        let field_ty = &field.ty;
+                        field.ty = parse_quote!(<#field_ty as crate::common::WrappedStructField>::Store);
+
                         field.vis = parse_quote!( pub(crate) );
 
                         let field_ident = field.ident.as_ref().expect("Missing field ident");
-                        wrapped_fields.push(field_ident.clone());
                     }
                 }
             }
@@ -154,7 +197,7 @@ pub trait Lang {
 
         Self::expose_impl(&mut impl_block, mod_path)?;
 
-        Ok((impl_block, wrapped_fields))
+        Ok(impl_block)
     }
 }
 

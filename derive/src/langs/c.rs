@@ -116,21 +116,9 @@ impl Lang for C {
         }
         structure.vis = parse_quote!(pub);
 
-        let (impl_block, wrapped_fields) =
+        let impl_block =
             Self::generate_getters_setters(structure, is_opaque, mod_path)?;
         extra.push(impl_block.into());
-
-        let wrapped_fields = wrapped_fields
-            .into_iter()
-            .map(|field| quote! { let _free = unsafe { Box::from_raw(self.#field) }; });
-        let custom_destructor: ItemImpl = parse_quote! {
-            impl Drop for #ident {
-                fn drop(&mut self) {
-                    #(#wrapped_fields)*
-                }
-            }
-        };
-        extra.push(custom_destructor.into());
 
         Ok(ident)
     }
@@ -387,59 +375,14 @@ impl Lang for C {
         Ok(ident)
     }
 
-    fn expose_getter(
-        structure: &Ident,
-        field: &mut Field,
-        is_opaque: bool,
-        impl_block: &mut ItemImpl,
-    ) -> Result<(), Self::Error> {
-        if !is_opaque {
-            return Ok(());
+    fn convert_getter_setter_ty(ty: Type) -> Result<(Type, Type), Self::Error> {
+        for t in types_arr!(i8, u8, i16, u16, i32, u32, i64, u64) {
+            if &ty == t {
+                return Ok((parse_quote!(#ty), parse_quote!(#ty)));
+            }
         }
 
-        let field_ty = &field.ty;
-        let field_ident = field.ident.as_ref().expect("Missing field ident");
-        let getter_name = format_ident!("get_{}", field_ident);
-        let getter: ImplItemMethod = parse_quote! {
-            #[getter]
-            fn #getter_name(&self) -> <#field_ty as crate::common::WrappedStructField>::Getter {
-                self.#field_ident.get()
-            }
-        };
-        impl_block.items.push(getter.into());
-
-        Ok(())
-    }
-
-    fn expose_setter(
-        structure: &Ident,
-        field: &mut Field,
-        is_opaque: bool,
-        impl_block: &mut ItemImpl,
-    ) -> Result<(), Self::Error> {
-        if !is_opaque {
-            return Ok(());
-        }
-
-        let field_ty = &field.ty;
-        let field_ident = field.ident.as_ref().expect("Missing field ident");
-        let setter_name = format_ident!("set_{}", field_ident);
-        let setter: ImplItemMethod = parse_quote! {
-            #[setter]
-            fn #setter_name(&mut self, #field_ident: <#field_ty as crate::common::WrappedStructField>::Setter) {
-                self.#field_ident.set(#field_ident);
-            }
-        };
-        impl_block.items.push(setter.into());
-
-        Ok(())
-    }
-
-    // let _free = unsafe { Box::from_raw(self.#field_ident) };
-    // self.#field_ident = #field_ident;
-
-    fn wrap_field_type(ty: Type) -> Result<Type, Self::Error> {
-        Ok(parse_quote!(crate::common::GetterSetterWrapper<#ty>))
+        Ok((parse_quote!(*mut #ty), parse_quote!(&#ty)))
     }
 
     fn convert_input(ty: Type) -> Result<Input, Self::Error> {

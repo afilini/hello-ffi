@@ -16,3 +16,9 @@ macro_rules! our_opaque_types {
         ]
     }
 }
+
+macro_rules! types_arr {
+    ($( $ty:ident ),*) => {
+        &[ Type::Verbatim(Default::default()), $( parse_quote!( $ty ) ),* ]
+    }
+}
